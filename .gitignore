@@ -1,4 +1,6 @@
 data/
+temp_images/*
+src/temp_images/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
