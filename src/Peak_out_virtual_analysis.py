@@ -8,6 +8,58 @@ subjects = ['subject_1','subject_2','subject_3','subject_4','subject_5','subject
 unwanted_values = ['unavailable', 'unknown']
 skip_substrings = ['event', 'HousejkjlEntrance']
 
+# Function to convert timedelta to seconds
+def timedelta_to_seconds(td):
+    return td.total_seconds()
+
+def create_combined_df(out_event_counts, peak_counts, all_dates):
+    combined_data = {'Date': all_dates}
+    combined_data['Out Events'] = get_values_for_dates({date: count for month_data in out_event_counts.values() for date, count in month_data.items()}, all_dates)
+    combined_data['Peaks'] = get_values_for_dates({date: count for month_data in peak_counts.values() for date, count in month_data.items()}, all_dates)
+    return pd.DataFrame(combined_data)
+
+# Function to get values for dates
+def get_values_for_dates(data_dict, all_dates):
+    return [data_dict.get(date, 0) for date in all_dates]
+
+# Plot the data
+def plot_out_event_and_peak_counts(combined_df, month, sn, kk):
+    if kk == 13:
+        temp_str = 'Temperature Peaks'
+    elif kk ==12:
+        temp_str = 'Humidity Peaks'
+        
+    plt.figure(figsize=(14, 7))
+
+    x = np.arange(len(combined_df['Date']))  # X locations for the groups
+    bar_width = 0.4  # Width of the bars
+
+    # Plot bars
+    plt.bar(x - bar_width / 2, combined_df['Out Events'], bar_width, label='Probable Out Events', alpha=0.7)
+    plt.bar(x + bar_width / 2, combined_df['Peaks'], bar_width, label=temp_str, alpha=0.7)
+
+    # Format x-axis
+    plt.xticks(x, combined_df['Date'], rotation=90)
+    plt.gca().xaxis.set_major_locator(plt.MaxNLocator(nbins=10))
+    
+    # Add titles and labels
+    plt.title(f'Probable Out-Events and Peak Counts for {month} and for '+str(subject_index_mapping[sn]))
+    plt.xlabel('Date')
+    plt.ylabel('Count')
+
+    # Add grid for better readability
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+
+    # Show legend
+    plt.legend()
+
+    # Display the plot
+    plt.tight_layout()
+    plt.savefig('out_events_and_peak_count'+str(month)+'_'+str(subject_index_mapping[sn])+'.png')
+
+    plt.show()
+
+
 def background_subtraction_denoise(df, background_method='median', window_size=5):
     df = df.copy()
 
@@ -30,8 +82,6 @@ def background_subtraction_denoise(df, background_method='median', window_size=5
     # Subtract the background from the original sensor value to get the denoised signal
     df['denoised_sensor_value'] = df['sensor_values'] - df['background']
     df['denoised_sensor_value'] = df['denoised_sensor_value'].apply(lambda x: max(x, 0))
-
-
     return df
 
 
@@ -90,6 +140,7 @@ def detect_peaks(df, column_name, prominence=1):
     return peaks, df
 
 def compute_probable_out_events(house_entrance_df, month, year):
+
     house_entrance_df_specific_month = house_entrance_df[
         (house_entrance_df['ts_on'].dt.year == year) & (house_entrance_df['ts_on'].dt.month == month)
     ]
@@ -153,9 +204,61 @@ def create_all_out_event_peaks(df, year, month):
     return peaks_per_day
 
 
-subject_data = load_subjectwise_data(data_path, subjects, unwanted_values, skip_substrings)
 
-df = subject_data[2].copy()
+def plot_sensor_values_with_peaks(stove_humidity_raw_data, year, month, detect_peaks):
+    """
+    Plots sensor values with detected peaks for a given year and month.
+
+    Parameters:
+    - stove_humidity_raw_data: DataFrame with columns 'ts' (timestamp in milliseconds) and 'sensor_values'
+    - year: The year to filter the data by
+    - month: The month to filter the data by
+    - detect_peaks: Function to detect peaks; should return indices of peaks and a DataFrame with peaks
+
+    Returns:
+    - None
+    """
+    # Convert 'ts' from milliseconds to datetime
+    stove_humidity_raw_data['datetime'] = pd.to_datetime(stove_humidity_raw_data['ts'], unit='ms')
+    
+    # Filter DataFrame by year and month
+    filtered_df_raw_stove = stove_humidity_raw_data[
+        (stove_humidity_raw_data['datetime'].dt.year == year) &
+        (stove_humidity_raw_data['datetime'].dt.month == month)
+    ]
+    
+    # Reset index after filtering
+    filtered_df_raw_stove = filtered_df_raw_stove.reset_index(drop=True)
+    
+    # Detect peaks
+    peaks_raw, df_with_peaks_raw = detect_peaks(filtered_df_raw_stove, 'sensor_values', prominence=2)
+    
+    # Plot the data
+    plt.figure(figsize=(12, 6))
+    
+    # Plot sensor values
+    plt.plot(filtered_df_raw_stove['datetime'], filtered_df_raw_stove['sensor_values'], linestyle='-', color='b', label='Sensor Values')
+    
+    # Plot peaks
+    plt.plot(filtered_df_raw_stove['datetime'].iloc[peaks_raw], filtered_df_raw_stove['sensor_values'].iloc[peaks_raw], 'ro', label='Detected Peaks')
+    
+    # Formatting the plot
+    plt.title(f'Sensor Values with Detected Peaks for {year}-{month:02d}')
+    plt.xlabel('Time (Date and Time)')
+    plt.ylabel('Sensor Values')
+    plt.xticks(rotation=45, ha='right')
+    plt.grid(True)
+    
+    # Show the legend
+    plt.legend()
+    
+    # Show the plot
+    plt.tight_layout()
+    plt.show()
+#%%
+# subject_data = load_subjectwise_data(data_path, subjects, unwanted_values, skip_substrings)
+sn = 2
+df = subject_data[sn].copy()
 house_entrance_df = df[9]['filtered_df'].copy()
 house_entrance_df['ts_on'] = pd.to_datetime(house_entrance_df['ts_on'])
 
@@ -165,16 +268,11 @@ months_of_interest = {
 }
 years = list(months_of_interest.keys())
 
-# Function to convert timedelta to seconds
-def timedelta_to_seconds(td):
-    return td.total_seconds()
-
-
 all_out_event_counts = {}
 all_out_event_times = {}
 all_out_event_peaks = {}
 
-
+denoise_df_yearwise = []
 for year in years:
     all_out_event_counts[year] = {}
     all_out_event_times[year] = {}
@@ -183,67 +281,37 @@ for year in years:
     months = months_of_interest[year]
     for month in months:
         out_event_count, out_event_times = compute_probable_out_events(house_entrance_df, month, year)
-
         all_out_event_counts[year][month] = out_event_count
         all_out_event_times[year][month] = out_event_times
         
-        k = 13
+        k = 13 # prominence  = 0.3 for k =12 prominence = 2
         stove_sensor_name = df[k]['sensor']
         stove_humidity_df = df[k]['filtered_df']
         stove_humidity_raw_data = df[k]['sensor_df']
         
+     
+
         if len(stove_humidity_raw_data) > 0:
             # Check if any sensor was activated during the ws-we interval
+            plot_sensor_values_with_peaks(stove_humidity_raw_data, year, month, detect_peaks)
+
             denoised_df = background_subtraction_denoise(stove_humidity_raw_data, background_method='mean', window_size=5)
+            
             denoised_df_month = denoised_df[
                 (denoised_df['ts'].dt.year == year) & (denoised_df['ts'].dt.month == month)
             ]
             denoised_df_month = denoised_df_month.reset_index(drop = True)
+            
+  
             peaks, df_with_peaks = detect_peaks(denoised_df_month, 'denoised_sensor_value', prominence=0.3)
             peaks_per_day = create_all_out_event_peaks(df_with_peaks, year, month)
 
-            # plot_denoised_sensor_values(df_with_peaks, peaks)
+            plot_denoised_sensor_values(df_with_peaks, peaks)
             all_out_event_peaks[year][month] = peaks_per_day
+            
+    denoise_df_yearwise.append(denoised_df)
+        
 
-def create_combined_df(out_event_counts, peak_counts, all_dates):
-    combined_data = {'Date': all_dates}
-    combined_data['Out Events'] = get_values_for_dates({date: count for month_data in out_event_counts.values() for date, count in month_data.items()}, all_dates)
-    combined_data['Peaks'] = get_values_for_dates({date: count for month_data in peak_counts.values() for date, count in month_data.items()}, all_dates)
-    return pd.DataFrame(combined_data)
-
-# Function to get values for dates
-def get_values_for_dates(data_dict, all_dates):
-    return [data_dict.get(date, 0) for date in all_dates]
-
-# Plot the data
-def plot_out_event_and_peak_counts(combined_df, month):
-    plt.figure(figsize=(14, 7))
-
-    x = np.arange(len(combined_df['Date']))  # X locations for the groups
-    bar_width = 0.4  # Width of the bars
-
-    # Plot bars
-    plt.bar(x - bar_width / 2, combined_df['Out Events'], bar_width, label='Out Events', alpha=0.7)
-    plt.bar(x + bar_width / 2, combined_df['Peaks'], bar_width, label='Peaks', alpha=0.7)
-
-    # Format x-axis
-    plt.xticks(x, combined_df['Date'], rotation=90)
-    plt.gca().xaxis.set_major_locator(plt.MaxNLocator(nbins=10))
-    
-    # Add titles and labels
-    plt.title(f'Out-Events and Peak Counts for {month}')
-    plt.xlabel('Date')
-    plt.ylabel('Count')
-
-    # Add grid for better readability
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
-
-    # Show legend
-    plt.legend()
-
-    # Display the plot
-    plt.tight_layout()
-    plt.show()
 
 for year in all_out_event_counts.keys():
     for month in all_out_event_counts[year].keys():
@@ -261,58 +329,6 @@ for year in all_out_event_counts.keys():
         combined_df = create_combined_df({month: out_event_counts}, {month: peak_counts}, all_dates)
         
         # Plot
-        plot_out_event_and_peak_counts(combined_df, f'{year}-{month:02d}')
-# for year in all_out_event_counts.keys():
-#     for month in all_out_event_counts[year].keys():
-#         out_event_counts = all_out_event_counts[year]
-#         peak_counts = all_out_event_peaks[year]
-#         # Extract dates from both out_event_counts and peak_counts
-#         out_event_dates = {date for month_data in out_event_counts.values() for date in month_data.keys()}
-#         peak_dates = {date for month_data in peak_counts.values() for date in month_data.keys()}
+        plot_out_event_and_peak_counts(combined_df, f'{year}-{month:02d}', sn, 13)
         
-#         # Combine and sort all dates
-#         all_dates = sorted(out_event_dates.union(peak_dates))
         
-#         # Prepare data for plotting
-#         def get_values_for_dates(data_dict, all_dates):
-#             return [data_dict.get(date, 0) for date in all_dates]
-        
-#         # Create a DataFrame for plotting
-#         def create_combined_df(out_event_counts, peak_counts):
-#             combined_data = {'Date': all_dates}
-#             combined_data['Out Events'] = get_values_for_dates({date: count for month_data in out_event_counts.values() for date, count in month_data.items()}, all_dates)
-#             combined_data['Peaks'] = get_values_for_dates({date: count for month_data in peak_counts.values() for date, count in month_data.items()}, all_dates)
-#             return pd.DataFrame(combined_data)
-        
-#         combined_df = create_combined_df(out_event_counts, peak_counts)
-#         plot_out_event_and_peak_counts(combined_df)
-        
-
-# def plot_out_event_and_peak_counts(combined_df):
-#     plt.figure(figsize=(14, 7))
-
-#     x = np.arange(len(combined_df['Date']))  # X locations for the groups
-#     bar_width = 0.4  # Width of the bars
-
-#     # Plot bars
-#     plt.bar(x - bar_width / 2, combined_df['Out Events'], bar_width, label='Out Events', alpha=0.7)
-#     plt.bar(x + bar_width / 2, combined_df['Peaks'], bar_width, label='Peaks', alpha=0.7)
-
-#     # Format x-axis
-#     plt.xticks(x, combined_df['Date'], rotation=90)
-#     plt.gca().xaxis.set_major_locator(plt.MaxNLocator(nbins=10))
-    
-#     # Add titles and labels
-#     plt.title('Out-Events and Peak Counts by Date')
-#     plt.xlabel('Date')
-#     plt.ylabel('Count')
-
-#     # Add grid for better readability
-#     plt.grid(axis='y', linestyle='--', alpha=0.7)
-
-#     # Show legend
-#     plt.legend()
-
-#     # Display the plot
-#     plt.tight_layout()
-#     plt.show()

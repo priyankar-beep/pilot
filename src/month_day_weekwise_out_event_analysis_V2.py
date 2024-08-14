@@ -8,25 +8,36 @@ subjects = ['subject_1','subject_2','subject_3','subject_4','subject_5','subject
 unwanted_values = ['unavailable', 'unknown']
 skip_substrings = ['event', 'HousejkjlEntrance']
 
-
+subject_index_mapping = {0: 'subject-1', 1:'subject-2', 2:'subject-3', 3:'subject-4', 4: 'subject-5', 5:'subject-7', 6:'subject-8'}
 subject_data = load_subjectwise_data(data_path, subjects, unwanted_values, skip_substrings)
-# Replace these with your actual subject_data and data extraction logic
-df = subject_data[0].copy()
-house_entrance_df = df[9]['filtered_df'].copy()
-house_entrance_df['ts_on'] = pd.to_datetime(house_entrance_df['ts_on'])
 
-months_of_interest = {
-    2023: [12],
-}
-years = list(months_of_interest.keys())
+
+# Function to format y-axis ticks as time
+def format_time(x, pos):
+    return str(timedelta(seconds=int(x)))
 
 # Function to convert timedelta to seconds
 def timedelta_to_seconds(td):
     return td.total_seconds()
 
-# Function to format y-axis ticks as time
-def format_time(x, pos):
-    return str(timedelta(seconds=int(x)))
+# Function to get week number of the month
+def week_of_month(date):
+    return (date.day - 1) // 7 + 1
+#%%
+sn = 2
+# Replace these with your actual subject_data and data extraction logic
+df = subject_data[sn].copy()
+house_entrance_df = df[9]['filtered_df'].copy()
+house_entrance_df['ts_on'] = pd.to_datetime(house_entrance_df['ts_on'])
+"""
+Date Specific Trends
+"""
+months_of_interest = {
+    2023: [10,11,12],
+    2024: [1,2,3,4,5]
+}
+years = list(months_of_interest.keys())
+
 
 # Iterate over each year
 for year in years:
@@ -93,59 +104,54 @@ for year in years:
         fig, ax1 = plt.subplots(figsize=(14, 7))
         
         # Bar plot for number of out-events per day
-        ax1.bar(date_list, count_list, color='skyblue', label='Number of Out-Events', alpha=0.6)
+        ax1.bar(date_list, count_list, color='skyblue', label='Number of Probable Out-Events', alpha=0.6)
         
         # Create a second y-axis for the duration plot
         ax2 = ax1.twinx()
-        scatter = ax2.scatter(scatter_dates, scatter_durations, color='red', label='Duration of Out-Events', alpha=0.7, s=50)
+        scatter = ax2.scatter(scatter_dates, scatter_durations, color='red', label='Duration of Problable Out-Events', alpha=0.7, s=50)
         
         # Format x-axis to show all dates of the month
         ax1.set_xticks(date_list)
         ax1.set_xticklabels(date_list, rotation=90)
 
         # Format y-axis for counts
-        ax1.set_ylabel('Number of Out-Events', color='skyblue')
+        ax1.set_ylabel('Number of Probable Out-Events', color='skyblue')
         ax1.tick_params(axis='y', labelcolor='skyblue')
 
         # Format y-axis for durations
-        ax2.set_ylabel('Duration of Out-Events (Seconds)', color='red')
+        ax2.set_ylabel('Duration of Probable Out-Events (Seconds)', color='red')
         ax2.tick_params(axis='y', labelcolor='red')
         
         # Format y-axis to show time of day
-        ax2.yaxis.set_major_formatter(plt.FuncFormatter(format_time))
+        # ax2.yaxis.set_major_formatter(plt.FuncFormatter(format_time))
 
         # Add titles and labels
-        plt.title(f'Out-Events and Durations for {year}-{month:02d}')
+        plt.title(f'Probable Out-Events and Durations for {year}-{month:02d} for {subject_index_mapping[sn]}')
         ax1.set_xlabel('Date')
 
         # Display the plot
         plt.tight_layout()  # Adjust plot to fit everything
         fig.legend(loc='upper right', bbox_to_anchor=(1,1), bbox_transform=ax1.transAxes)
+        plt.savefig('out_events_plot_'+str(subject_index_mapping[sn])+'_'+str(year)+'_'+str(month)+'.png')
         plt.show()
 
-import pandas as pd
-import matplotlib.pyplot as plt
-from datetime import timedelta
 
 # Sample data for demonstration purposes
 # Replace these with your actual subject_data and data extraction logic
-df = subject_data[0].copy()
-house_entrance_df = df[9]['filtered_df'].copy()
-house_entrance_df['ts_on'] = pd.to_datetime(house_entrance_df['ts_on'])
+# df = subject_data[0].copy()
+# house_entrance_df = df[9]['filtered_df'].copy()
+# house_entrance_df['ts_on'] = pd.to_datetime(house_entrance_df['ts_on'])
+#%%
+"""
+Monthly trends
+"""
 
-months_of_interest = {
-    2023: [9, 10, 11, 12],
-    2024: [1, 2, 3, 4, 5]
-}
 years = list(months_of_interest.keys())
 
 # Initialize dictionaries to store counts and durations of out-events per month
 monthly_event_count = {}
 monthly_event_durations = {}
 
-# Function to convert timedelta to seconds
-def timedelta_to_seconds(td):
-    return td.total_seconds()
 
 # Iterate over each year
 for year in years:
@@ -207,49 +213,31 @@ bars = ax1.bar(months, counts, color='skyblue', edgecolor='black', alpha=0.7)
 
 # Create a secondary y-axis for the duration plot
 ax2 = ax1.twinx()
-scatter = ax2.scatter(durations_months, durations, color='red', label='Duration of Out-Events', alpha=0.7, s=50)
+scatter = ax2.scatter(durations_months, durations, color='red', label='Duration of Probable Out-Events', alpha=0.7, s=50)
 
 # Add titles and labels
-ax1.set_title('Number of Out-Events and Durations per Month')
+ax1.set_title('Number of Probable Out-Events and Durations per Month ' +str(subject_index_mapping[sn]))
 ax1.set_xlabel('Month')
-ax1.set_ylabel('Number of Out-Events')
-ax2.set_ylabel('Duration of Out-Events (Seconds)', color='red')
+ax1.set_ylabel('Number of Probable Out-Events')
+ax2.set_ylabel('Duration of Probable Out-Events (Seconds)', color='red')
 ax2.tick_params(axis='y', labelcolor='red')
 
 # Rotate x-axis labels for better readability
 plt.xticks(rotation=45, ha='right')
-
 # Add grid for better readability
 ax1.grid(axis='y', linestyle='--', alpha=0.7)
-
 # Add legend
 fig.legend(loc='upper right', bbox_to_anchor=(1,1), bbox_transform=ax1.transAxes)
 
 # Show the plot
 plt.tight_layout()  # Adjust plot to ensure everything fits without overlap
+plt.savefig('out_events_plot_montly_trend_'+str(subject_index_mapping[sn])+'.png')
+
 plt.show()
 
-import pandas as pd
-import matplotlib.pyplot as plt
-from datetime import timedelta
+# %%
 
-df = subject_data[0].copy()
-house_entrance_df = df[9]['filtered_df'].copy()
-house_entrance_df['ts_on'] = pd.to_datetime(house_entrance_df['ts_on'])
-
-months_of_interest = {
-    2023: [12],
-}
 years = list(months_of_interest.keys())
-
-# Function to get week number of the month
-def week_of_month(date):
-    return (date.day - 1) // 7 + 1
-
-# Function to convert timedelta to seconds
-def timedelta_to_seconds(td):
-    return td.total_seconds()
-
 # Iterate over each year
 for year in years:
     months = months_of_interest[year]
@@ -318,16 +306,18 @@ for year in years:
         fig, ax1 = plt.subplots(figsize=(12, 6))
         
         # Bar plot for number of out-events per week
-        bars = ax1.bar(weeks, counts, color='skyblue', edgecolor='black', alpha=0.7)
+        # bars = ax1.bar(weeks, counts, color='skyblue', edgecolor='black', alpha=0.7)
+        bars = ax1.bar(weeks, counts, color='skyblue', edgecolor='black', alpha=0.7, label='Number of Probable Out-Events')
+
 
         # Create a secondary y-axis for the duration plot
         ax2 = ax1.twinx()
         scatter = ax2.scatter(scatter_weeks, scatter_durations, color='red', label='Duration of Out-Events', alpha=0.7, s=50)
 
         # Add titles and labels
-        ax1.set_title(f'Number of Out-Events and Durations per Week for {year}-{month:02d}')
+        ax1.set_title(f'Number of Probable Out-Events and Durations per Week for month {year}-{month:02d} for '+str(subject_index_mapping[sn]))
         ax1.set_xlabel('Week of Month')
-        ax1.set_ylabel('Number of Out-Events')
+        ax1.set_ylabel('Number of Probable Out-Events')
         ax2.set_ylabel('Duration of Out-Events (Seconds)', color='red')
         ax2.tick_params(axis='y', labelcolor='red')
 
@@ -342,4 +332,6 @@ for year in years:
 
         # Show the plot
         plt.tight_layout()  # Adjust plot to ensure everything fits without overlap
+        plt.savefig('out_events_plot_weekly_trend_'+str(year)+'_'+str(month)+'_'+str(subject_index_mapping[sn])+'.png')
+
         plt.show()

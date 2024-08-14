@@ -5,7 +5,8 @@ src/temp_images/
 __pycache__/
 *.py[cod]
 *$py.class
-
+*.png
+*.jpg
 # C extensions
 *.so
 

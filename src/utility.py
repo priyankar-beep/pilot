@@ -57,7 +57,7 @@ sensor_files = [
 
 def load_subjectwise_data(data_path, subjects, unwanted_values, skip_substrings):
     subject_data = []
-    for sub in range(3):#len(subjects)):
+    for sub in range(len(subjects)):
         subject_sub = subjects[sub]
         subject_data_path = os.path.join(data_path, subject_sub, 'environmentals')
         print(subject_data_path)
