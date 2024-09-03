@@ -172,6 +172,7 @@ def remove_continuous_on_off(df_cleaned_1):
         for i in reversed(list(df_cleaned.index)[1:]):
             if df_cleaned.loc[i].sensor_status == df_cleaned.iloc[df_cleaned.index.get_loc(i)-1].sensor_status:
                 df_cleaned.drop([i], inplace=True)
+                # print(i)
     else:
         isEnvironmentalSensor = False
     return df_cleaned, isEnvironmentalSensor
@@ -217,7 +218,7 @@ def convert_real_valued_to_on_off(threshold_value, df):
     
 def read_csv_files(data_path):
     subjects = natsorted(os.listdir(data_path))
-    
+    milliseconds_in_2_hours = 2 * 60 * 60 * 1000
     subject_dfs = {}
     for s in range(len(subjects)):
         print('-*'*40)
@@ -234,8 +235,10 @@ def read_csv_files(data_path):
             if filename.endswith('.csv') and not filename.startswith('.~lock'):
                 print(os.path.join(path_subject, filename))
                 df = pd.read_csv(os.path.join(path_subject, filename))
+                df['ts'] = df['ts'] + milliseconds_in_2_hours
                 if len(df) > 0:
-                    df = df[~df['sensor_status'].isin(['unavailable', 'unknown'])]               
+                    df = df[~df['sensor_status'].isin(['unavailable', 'unknown'])]    
+                    df = df.reset_index(inplace=True)
                     df, isEnvironmentalSensor = remove_continuous_on_off(df)
                     df['ts_datetime'] = pd.to_datetime(df['ts'], unit='ms')
                     
@@ -255,76 +258,230 @@ def read_csv_files(data_path):
         subject_dfs[subject_s] = dfs_dict
     return subject_dfs
 
-def count_virtual_out_events(house_entrance, data_subject_1, year = None, month = None, st = None, et = None):
-    if year != None and month != None:
-        # print('+-'*20)
-        house_entrance = house_entrance[(house_entrance['ts_on'].dt.year == year) & (house_entrance['ts_on'].dt.month == month)]
-        if st != None and et != None:
-            # print('xxxxxxxxxxxxxx')
-            house_entrance = house_entrance[
-                (house_entrance['ts_on'].dt.time >= st) &
-                (house_entrance['ts_on'].dt.time < et)]   
-        # print(house_entrance)
+# def count_virtual_out_events(house_entrance, data_subject_1, year = None, month = None, st = None, et = None):
+#     if year != None and month != None:
+#         # print('+-'*20)
+#         house_entrance = house_entrance[(house_entrance['ts_on'].dt.year == year) & (house_entrance['ts_on'].dt.month == month)]
+#         if st != None and et != None:
+#             # print('xxxxxxxxxxxxxx')
+#             house_entrance = house_entrance[
+#                 (house_entrance['ts_on'].dt.time >= st) &
+#                 (house_entrance['ts_on'].dt.time < et)]   
+#         # print(house_entrance)
+#     out_event_timimg = []
+#     out_event_count = 0
+#     for he in range(1, len(house_entrance)):
+#         # print('-------------------------------')
+#         ws = house_entrance.iloc[he-1]['ts_off']
+#         we = house_entrance.iloc[he]['ts_on']
+#         # print(he, ws, we)
+#         is_out_event = True
+        
+#         for j in range(len(environmental_sensors)):
+#             sensor_name = environmental_sensors[j]
+#             # print(j ,sensor_name)
+#             if sensor_name not in ['HouseEntrance.csv','Hum_Temp_Bath_humidity.csv', 'Hum_Temp_Bath_temp.csv', 'Hum_Temp_Stove_humidity.csv', 'Hum_Temp_Stove_temp.csv']: 
+#                 sensor_df_raw = data_subject_1[sensor_name][0]
+#                 sensor_df_processed = data_subject_1[sensor_name][1]
+                
+#                 ## I can not work on the sensors which provide real values because they are being utilized or not,
+#                 ## they will always provide some real values. Instead I have to utilize on those sensors which provide values
+#                 ## like on and off
+                
+#                 if len(sensor_df_processed) > 0:
+#                     temp_df = sensor_df_processed[(sensor_df_processed['ts_on'] >= ws) & (sensor_df_processed['ts_on'] <= we)]
+#                     # print(sensor_name, len(temp_df))
+#                     if not temp_df.empty:
+#                         is_out_event = False
+#                         # print('----------')
+#                         break
+                    
+#         if is_out_event == True:
+#             out_event_count = out_event_count + 1
+#             out_event_timimg.append((he,ws,we))
+            
+#     return out_event_count, out_event_timimg
+
+# he_Df = house_entrance.copy()
+# house_entrance = he_Df.copy()
+def determine_sensor_case(ws, we, ts_on, ts_off):
+    # Case 1: Sensor turned on and off inside the window
+    if ws <= ts_on <= we and ws <= ts_off <= we:
+        return 1
+    
+    # Case 2: Sensor turned on before and off after the window
+    elif ts_on < ws and ts_off > we:
+        return 2
+    
+    # Case 3: Sensor turned on inside the window and off after the window
+    elif ws <= ts_on <= we and ts_off > we:
+        return 3
+    
+    # Case 4: Sensor turned on before the window and off inside the window
+    elif ts_on < ws and ws <= ts_off <= we:
+        return 4
+    
+    # If none of the cases match, return None
+    return None
+
+def count_virtual_out_events(house_entrance, data_subject_1, year=None, month=None, st=None, et=None):
+        
+
+    house_entrance_df = []
+    for m in range(1 , len(house_entrance)):
+        house_entrance_df.append((house_entrance.iloc[m-1]['ts_off'],house_entrance.iloc[m]['ts_on']))
+        
+    house_entrance_df  = pd.DataFrame(house_entrance_df, columns = ['ws', 'we'])
+    house_entrance_df_year_month = house_entrance_df[(house_entrance_df['ws'].dt.year == year) & (house_entrance_df['ws'].dt.month == month)]
+    ## make windows
+    
+    if st is not None and et is not None:
+        sub_df = house_entrance_df_year_month[
+            (house_entrance_df_year_month['ws'].dt.time >= st) &
+            (house_entrance_df_year_month['ws'].dt.time < et)]
+    else:
+        sub_df = house_entrance_df_year_month.copy()
+    
     out_event_timimg = []
     out_event_count = 0
-    for he in range(1, len(house_entrance)):
-        # print('-------------------------------')
-        ws = house_entrance.iloc[he-1]['ts_off']
-        we = house_entrance.iloc[he]['ts_on']
-        # print(he, ws, we)
-        is_out_event = True
+    inside_home_timings = []
+    for he in range(len(sub_df)):
+        ws = sub_df.iloc[he]['ws']
+        we = sub_df.iloc[he]['we']
+        duration = (we - ws).total_seconds() / 60
         
+        is_out_event = True
+        temp = []
         for j in range(len(environmental_sensors)):
             sensor_name = environmental_sensors[j]
-            # print(j ,sensor_name)
-            if sensor_name not in ['HouseEntrance.csv','Hum_Temp_Bath_humidity.csv', 'Hum_Temp_Bath_temp.csv', 'Hum_Temp_Stove_humidity.csv', 'Hum_Temp_Stove_temp.csv']: 
-                sensor_df_raw = data_subject_1[sensor_name][0]
-                sensor_df_processed = data_subject_1[sensor_name][1]
-                
-                ## I can not work on the sensors which provide real values because they are being utilized or not,
-                ## they will always provide some real values. Instead I have to utilize on those sensors which provide values
-                ## like on and off
-                
-                if len(sensor_df_processed) > 0:
-                    temp_df = sensor_df_processed[(sensor_df_processed['ts_on'] >= ws) & (sensor_df_processed['ts_on'] <= we)]
-                    # print(sensor_name, len(temp_df))
-                    if not temp_df.empty:
-                        is_out_event = False
-                        # print('----------')
-                        break
-                    
-        if is_out_event == True:
-            out_event_count = out_event_count + 1
-            out_event_timimg.append((he,ws,we))
             
-    return out_event_count, out_event_timimg
+            # Check if the sensor is not in the excluded list
+            if sensor_name in ['HouseEntrance.csv', 'Shower_Hum_Temp_humidity.csv', 'Shower_Hum_Temp_temp.csv', 'Stove_Hum_Temp_humidity.csv', 'Stove_Hum_Temp_temp.csv']:
+                continue
+            
+            sensor_df_raw = data_subject_1[sensor_name][0]
+            sensor_df_processed = data_subject_1[sensor_name][1]
+            
+            if len(sensor_df_processed) > 0:
+                if 'Motion' not in sensor_name:
+                    temp_df = sensor_df_processed[(sensor_df_processed['ts_on'] <= we) & (sensor_df_processed['ts_off'] >= ws)]
+                    if not temp_df.empty:
+                        print(j, sensor_name)
+                        for r in range(len(temp_df)):
+                            ts_on, ts_off = temp_df.iloc[r]['ts_on'], temp_df.iloc[r]['ts_off']
+                            case_value = determine_sensor_case(ws, we, ts_on, ts_off)
+                            # if case_value == 2:
+                            #     is_out_event = True
+                            if case_value in [1,3,4]:
+                                # print(j, sensor_name)
+                                is_out_event = False
+                                break
+                            
+                else:#if 'Motion' in sensor_name:
+                    temp_df = sensor_df_processed[(sensor_df_processed['ts_on'] <= we) & (sensor_df_processed['ts_off'] >= ws)]
+                    if not temp_df.empty:
+                        print(j, sensor_name, temp_df)
+                        temp.append(temp_df)
+                        for r in range(len(temp_df)):
+                            ts_on, ts_off = temp_df.iloc[r]['ts_on'], temp_df.iloc[r]['ts_off']
+                            case_value = determine_sensor_case(ws, we, ts_on, ts_off)
+                            if case_value in [1,3]:
+                                is_out_event = False
+                                break
+                            # if ts_on < ws and ws <= ts_off <= we:
+                            #     is_out_event = True
+                            #     # print(j,sensor_name)
+                            # else:
+                            #     is_out_event = False
+                            #     break
+                                
+        if is_out_event:            
+            out_event_count += 1
+            out_event_timimg.append((he, ws, we))               
+                
+
+    return out_event_count, out_event_timimg, inside_home_timings
+
+
+
+# def count_virtual_out_events(house_entrance, data_subject_1, year=None, month=None, st=None, et=None):
+#     if year is not None and month is not None:
+#         house_entrance = house_entrance[(house_entrance['ts_on'].dt.year == year) & (house_entrance['ts_on'].dt.month == month)]
+#         if st is not None and et is not None:
+#             house_entrance = house_entrance[
+#                 (house_entrance['ts_on'].dt.time >= st) &
+#                 (house_entrance['ts_on'].dt.time < et)]
+    
+#     out_event_timimg = []
+#     out_event_count = 0
+#     inside_home_timings = []
+#     for he in range(1, len(house_entrance)):
+#         ws = house_entrance.iloc[he-1]['ts_off']
+#         we = house_entrance.iloc[he]['ts_on']
+#         duration = (we - ws).total_seconds() / 60
+        
+#         # Only proceed if the duration is greater than 10 minutes
+#         # if duration > 10:
+#         is_out_event = True
+#         temp = {}
+#         for j in range(len(environmental_sensors)):
+#             sensor_name = environmental_sensors[j]
+            
+#             if sensor_name not in ['HouseEntrance.csv','Shower_Hum_Temp_humidity.csv', 'Shower_Hum_Temp_temp.csv', 'Stove_Hum_Temp_humidity.csv', 'Stove_Hum_Temp_temp.csv']: 
+#                 # print(sensor_name)
+#                 sensor_df_raw = data_subject_1[sensor_name][0]
+#                 sensor_df_processed = data_subject_1[sensor_name][1]
+                
+#                 if len(sensor_df_processed) > 0:
+#                     temp_df = sensor_df_processed[(sensor_df_processed['ts_on'] >= ws) & (sensor_df_processed['ts_off'] <= we)]
+#                     # temp_df = sensor_df_processed[(sensor_df_processed['ts_on'] <= we) & (sensor_df_processed['ts_off'] >= ws)]
+#                     if not temp_df.empty:
+#                         is_out_event = False
+#                         temp[sensor_name] = temp_df
+                        
+#                         break
+                    
+#         inside_home_timings.append(temp)
+#         if is_out_event:
+#             out_event_count += 1
+#             out_event_timimg.append((he, ws, we))
+
+#     return out_event_count, out_event_timimg, inside_home_timings
+
       
 
-def detect_peaks(df, value_col, prominence=1.5):
+def detect_peaks(df, value_col='sensor_status', prominence=1.5):
     if value_col not in df.columns:
         return [], df 
-    df = df.copy()
-    peaks, properties = find_peaks(df[value_col], prominence=prominence)
-    peak_indicator = [0] * len(df)
+    df1 = df.copy()
+    peaks, properties = find_peaks(df1[value_col], prominence=prominence)
+    peak_indicator = [0] * len(df1)
     for peak in peaks:
-        if peak < len(peak_indicator):
-            peak_indicator[peak] = 1
-    df['peak_detected'] = peak_indicator
-    return peaks,df
+        peak_indicator[peak] = 1
+    df1['peak_detected'] = peak_indicator
+    return peaks,df1
 
 def count_peaks(data_subject_1, sensor_file, year = None, month = None, prominence = 1.5, st=None, et = None):
     if sensor_file in data_subject_1:
         temperatue_data = data_subject_1[sensor_file][0]    
+        temperatue_data = temperatue_data.reset_index(inplace = True)
         if year != None and month != None:
             temperatue_data = temperatue_data[(temperatue_data['ts_datetime'].dt.year == year) & (temperatue_data['ts_datetime'].dt.month == month)]
+            temperatue_data = temperatue_data.reset_index(inplace = True)
             if st != None and et !=None:
-                print('xxxxxxxxxxxx')
+                # print('xxxxxxxxxxxx')
                 temperatue_data = temperatue_data[
                     (temperatue_data['ts_datetime'].dt.time >= st) &
-                    (temperatue_data['ts_datetime'].dt.time < et)] 
+                    (temperatue_data['ts_datetime'].dt.time <= et)] 
+                
+                temperatue_data = temperatue_data.reset_index(inplace = True)
             # print(temperatue_data)
             
-        peaks, df_temperature_data= detect_peaks(temperatue_data, 'sensor_status', prominence=prominence)        
+        peaks, df_temperature_data= detect_peaks(temperatue_data, 'sensor_status', prominence=prominence)  
+        selected_df = temperatue_data.loc[peaks, ['ts_datetime', 'sensor_status']]
+        
+        # Output the result
+        print(selected_df)
         peak_count = len(peaks)
     else:
         peak_count = 0
@@ -384,9 +541,48 @@ def plot_signal_with_peaks(df_with_humidity_peaks, peaks_humidity, df_with_tempe
     plt.ylabel('Sensor Value')
     plt.title('Humidity and Temperature Signals with Detected Peaks for ' + subject_name)
     plt.legend()
+    plt.xticks(rotation=45)
+    plt.tight_layout()
     plt.savefig(f'{subject_name}_{year}_{month}.png')
     # Display the plot
     plt.show()
+
+# def plot_event_and_peak_counts(all_out_event_counts, all_temperature_peak_counts, all_humidity_peak_counts, subject_name, strng):
+#     months_years = []
+#     out_event_counts = []
+#     temperature_peak_counts = []
+#     humidity_peak_counts = []
+
+#     # Iterate over years and months, combining all counts
+#     for year in sorted(set(all_out_event_counts.keys()).union(all_temperature_peak_counts.keys()).union(all_humidity_peak_counts.keys())):
+#         for month in sorted(set(all_out_event_counts.get(year, {}).keys())
+#                             .union(all_temperature_peak_counts.get(year, {}).keys())
+#                             .union(all_humidity_peak_counts.get(year, {}).keys())):
+#             month_year_str = f"{month:02d}-{year}"
+#             months_years.append(month_year_str)
+#             out_event_counts.append(all_out_event_counts.get(year, {}).get(month, 0))
+#             temperature_peak_counts.append(all_temperature_peak_counts.get(year, {}).get(month, 0))
+#             humidity_peak_counts.append(all_humidity_peak_counts.get(year, {}).get(month, 0))
+
+#     x = np.arange(len(months_years))  # the label locations
+#     width = 0.3  # the width of the bars (adjusted for three bars)
+
+#     fig, ax = plt.subplots(figsize=(14, 7))
+#     bars1 = ax.bar(x - width, out_event_counts, width, label='Probable Out Events', color='red')
+#     bars2 = ax.bar(x, temperature_peak_counts, width, label='Temperature Peaks', color='blue')
+#     bars3 = ax.bar(x + width, humidity_peak_counts, width, label='Humidity Peaks', color='green')
+
+#     # Customize the plot
+#     ax.set_xlabel('Month-Year', fontsize=16)
+#     ax.set_ylabel('Count', fontsize=16)
+#     ax.set_title(f'Monthly Probable Out Events, Temperature Peaks, and Humidity Peaks for {subject_name}', fontsize=16)
+#     ax.set_xticks(x)
+#     ax.set_xticklabels(months_years, rotation=45, ha="right", fontsize=16)
+#     ax.tick_params(axis='y', labelsize=16)
+#     ax.legend(loc='best', fontsize=14)
+#     plt.tight_layout()
+#     plt.savefig(f'{subject_name}_{strng}_events_peaks.png')
+#     plt.show()
 
 def plot_event_and_peak_counts(all_out_event_counts, all_temperature_peak_counts, all_humidity_peak_counts, subject_name, strng):
     months_years = []
@@ -413,6 +609,19 @@ def plot_event_and_peak_counts(all_out_event_counts, all_temperature_peak_counts
     bars2 = ax.bar(x, temperature_peak_counts, width, label='Temperature Peaks', color='blue')
     bars3 = ax.bar(x + width, humidity_peak_counts, width, label='Humidity Peaks', color='green')
 
+    # Annotate bars with counts
+    for bar in bars1:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width() / 2, height, f'{height}', ha='center', va='bottom', fontsize=12)
+
+    for bar in bars2:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width() / 2, height, f'{height}', ha='center', va='bottom', fontsize=12)
+
+    for bar in bars3:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width() / 2, height, f'{height}', ha='center', va='bottom', fontsize=12)
+
     # Customize the plot
     ax.set_xlabel('Month-Year', fontsize=16)
     ax.set_ylabel('Count', fontsize=16)
@@ -425,21 +634,20 @@ def plot_event_and_peak_counts(all_out_event_counts, all_temperature_peak_counts
     plt.savefig(f'{subject_name}_{strng}_events_peaks.png')
     plt.show()
 
-
 #%%
 # subject_data_june2024_august2024
 # subject_data_sepetember2023_may2024
 
 ## One time run only 
 # subject_dfs = read_csv_files(data_path)
-# with open('subject_data_sepetember2023_may2024.pkl', 'wb') as file:
+# with open('subject_data_sepetember2023_may2024_2hours.pkl', 'wb') as file:
 #     pickle.dump(subject_dfs, file)
 
-# with open('subject_data_june2024_august2024.pkl', 'rb') as file:
+# with open('results/subject_data_june2024_august2024.pkl', 'rb') as file:
 #     data = pickle.load(file)
 
 
-with open('subject_data_june2024_august2024.pkl', 'rb') as file:
+with open('/home/hubble/work/serenade/src/subject_data_sepetember2023_may2024_2hours.pkl', 'rb') as file:
     data = pickle.load(file)
 #%%
 subjects = list(data.keys())
@@ -448,8 +656,11 @@ years_months = {
     2024: [1,2,3,4,5,6,7,8]
 }
 
-st = None#pd.to_datetime('18:00:00').time()
-et = None#pd.to_datetime('23:59:00').time()
+# st = pd.to_datetime('11:00:00').time()
+# et = pd.to_datetime('14:59:00').time()
+
+st = None
+et = None
 
 years = list(years_months.keys())
 subjectwise_count = {}
@@ -482,7 +693,8 @@ for sn in range(len(subjects)):
         
         for month in months:
             if len(house_entrance) > 0:
-                out_counts, out_timings = count_virtual_out_events(house_entrance, data_subject_1, year = year, month = month, st=st, et=et)
+                from datetime import timedelta
+                out_counts, out_timings,xx = count_virtual_out_events(house_entrance, data_subject_1, year = year, month = month, st=st, et=et)
                 all_out_event_counts[year][month] = out_counts
                 all_out_event_timings[year][month] = out_timings
                 
@@ -495,74 +707,169 @@ for sn in range(len(subjects)):
             all_temperature_peak_counts[year][month] = peak_count_temperature
             all_humidity_peak_counts[year][month] = peak_count_humidity
             
-            if len(df_with_humidity_peaks) > 0 and len(df_with_temperature_peaks) > 0:
-                plot_signal_with_peaks(df_with_humidity_peaks, peaks_humidity, df_with_temperature_peaks, peaks_temperature, 'temperature peaks', 'humidity peaks', subject_name, year, month)
+            # if len(df_with_humidity_peaks) > 0 and len(df_with_temperature_peaks) > 0:
+            #     plot_signal_with_peaks(df_with_humidity_peaks, peaks_humidity, df_with_temperature_peaks, peaks_temperature, 'temperature peaks', 'humidity peaks', subject_name, year, month)
             
     # plot_event_and_peak_counts(all_out_event_counts, all_temperature_peak_counts, all_humidity_peak_counts, subject_name, strng = 'whole_day')
-    # subjectwise_count[subject_name] = [all_temperature_peak_counts,all_humidity_peak_counts,all_out_event_counts]
+    subjectwise_count[subject_name] = [all_temperature_peak_counts,all_humidity_peak_counts,all_out_event_counts]
 
 
-# with open('dinner_count_june2024_august2024.pkl', 'wb') as pickle_file:
+# with open('withouttiny_dinner_count_sepetember2023_may2024.pkl', 'wb') as pickle_file:
+#     pickle.dump(subjectwise_count, pickle_file)
+
+# with open('withouttiny_breakfast_count_june2024_august2024.pkl', 'wb') as pickle_file:
 #     pickle.dump(subjectwise_count, pickle_file)
     
-# with open('count_june2024_august2024.pkl', 'rb') as file:
-#     data1 = pickle.load(file)
+with open('results/withouttiny_dinner_count_june2024_august2024.pkl', 'rb') as file:
+    data1 = pickle.load(file)
     
-# with open('count_sepetember2023_may2024.pkl', 'rb') as file:
-#     data2 = pickle.load(file)    
+with open('results/withouttiny_dinner_count_sepetember2023_may2024.pkl', 'rb') as file:
+    data2 = pickle.load(file)    
     
     
-# def merge_data_dicts(data1, data2, temp):
-#     merged_data = {}
+def merge_data_dicts(data1, data2, temp):
+    merged_data = {}
 
-#     # Get all unique keys from both data1 and data2
-#     all_keys = set(data1.keys()).union(set(data2.keys()))
+    # Get all unique keys from both data1 and data2
+    all_keys = set(data1.keys()).union(set(data2.keys()))
 
-#     for key in all_keys:
-#         if key in data1 and key in data2:  # If the key is present in both dictionaries
-#             merged_dict = {}
+    for key in all_keys:
+        if key in data1 and key in data2:  # If the key is present in both dictionaries
+            merged_dict = {}
 
-#             dict1 = data1[key][temp]
-#             dict2 = data2[key][temp]  
+            dict1 = data1[key][temp]
+            dict2 = data2[key][temp]  
 
-#             # Sum the values for each year and month where both dict1 and dict2 have values
-#             for year, months_dict in dict1.items():
-#                 merged_dict[year] = {}
-#                 for month, value in months_dict.items():
-#                     merged_value = value + dict2.get(year, {}).get(month, 0)
-#                     merged_dict[year][month] = merged_value
+            # Sum the values for each year and month where both dict1 and dict2 have values
+            for year, months_dict in dict1.items():
+                merged_dict[year] = {}
+                for month, value in months_dict.items():
+                    merged_value = value + dict2.get(year, {}).get(month, 0)
+                    merged_dict[year][month] = merged_value
 
-#             # Place the merged_dict in the first position of the list, keeping the rest from data1
-#             merged_data[key] = merged_dict
+            # Place the merged_dict in the first position of the list, keeping the rest from data1
+            merged_data[key] = merged_dict
 
-#         elif key in data1 and key not in data2:  # If the key is only in data1, include it as is
-#             merged_data[key] = data1[key][temp]
+        elif key in data1 and key not in data2:  # If the key is only in data1, include it as is
+            merged_data[key] = data1[key][temp]
 
-#         elif key in data2 and key not in data1:  # If the key is only in data2, include it as is
-#             merged_data[key] = data2[key][temp]
+        elif key in data2 and key not in data1:  # If the key is only in data2, include it as is
+            merged_data[key] = data2[key][temp]
 
-#     return merged_data
+    return merged_data
 
-# # Example usage:
-# # Assuming data1 and data2 are already defined dictionaries
-# merged_temp_peak = merge_data_dicts(data1, data2, 0)
-# merged_humid_peak = merge_data_dicts(data1, data2, 1)
-# merged_out_peak = merge_data_dicts(data1, data2, 2)
+# Example usage:
+# Assuming data1 and data2 are already defined dictionaries
+merged_temp_peak = merge_data_dicts(data1, data2, 0)
+merged_humid_peak = merge_data_dicts(data1, data2, 1)
+merged_out_peak = merge_data_dicts(data1, data2, 2)
 
 
-# for subject_name in merged_temp_peak.keys():
-#     # Extract the peak counts and out event counts for the current subject
-#     all_temperature_peak_counts = merged_temp_peak[subject_name]
-#     all_humidity_peak_counts = merged_humid_peak[subject_name]
-#     all_out_event_counts = merged_out_peak[subject_name]
+for subject_name in merged_temp_peak.keys():
+    # Extract the peak counts and out event counts for the current subject
+    all_temperature_peak_counts = merged_temp_peak[subject_name]
+    all_humidity_peak_counts = merged_humid_peak[subject_name]
+    all_out_event_counts = merged_out_peak[subject_name]
     
-#     # Call the plotting function for the current subject
-#     plot_event_and_peak_counts(
-#         all_out_event_counts,
-#         all_temperature_peak_counts,
-#         all_humidity_peak_counts,
-#         subject_name,  strng = 'wholeday'
-#     )
+    # Call the plotting function for the current subject
+    plot_event_and_peak_counts(
+        all_out_event_counts,
+        all_temperature_peak_counts,
+        all_humidity_peak_counts,
+        subject_name,  strng = 'dinner_withouttiny'
+    )
+
+
+
+
+
+
+years = [2023, 2024]
+results = {}
+
+for year in years:
+    results[year] = {}
+    data_year = all_out_event_timings[year]  # Corrected from 2024 to year
+
+    months = list(data_year.keys())
+    for month in months:
+        tiny_count = 0
+        short_count = 0
+        medium_count = 0
+        long_count = 0
+
+        month_data = data_year[month]
+        if len(month_data) > 0:
+            for md in range(len(month_data)):
+                duration = ((month_data[md][2] - month_data[md][1]).total_seconds()) / 60
+                if duration < 10:
+                    tiny_count += 1
+                elif duration < 60:
+                    short_count += 1
+                elif duration < 240:
+                    medium_count += 1
+                else:
+                    long_count += 1
+        
+        # Store the counts for each month under the corresponding year
+        results[year][month] = {
+            "TINY": tiny_count,
+            "SHORT": short_count,
+            "MEDIUM": medium_count,
+            "LONG": long_count
+        }
+
+# Now results will have a structure like:
+# {
+#     2023: {
+#         1: {"TINY": ..., "SHORT": ..., "MEDIUM": ..., "LONG": ...},
+#         2: {"TINY": ..., "SHORT": ..., "MEDIUM": ..., "LONG": ...},
+#         ...
+#     },
+#     2024: {
+#         1: {"TINY": ..., "SHORT": ..., "MEDIUM": ..., "LONG": ...},
+#         2: {"TINY": ..., "SHORT": ..., "MEDIUM": ..., "LONG": ...},
+#         ...
+#     }
+# }
+
+
+
+
+
+years = [2023, 2024]
+results = {}
+tiny_count = 0
+short_count = 0
+medium_count = 0
+long_count = 0
+for year in years:
+    results[year] = {}
+    data_year = all_out_event_timings[2024]
+
+    months = list(data_year.keys())
+    for month in months:
+        month_data = data_year[month]
+        if len(month_data) > 0:
+            for md in range(len(month_data)):
+                duration = ((month_data[md][2] - month_data[md][1]).total_seconds())/60
+                if duration < 10:
+                    tiny_count += 1
+                elif duration < 60:
+                    short_count += 1
+                elif duration < 240:
+                    medium_count += 1
+                else:
+                    long_count += 1
+        results[year] = {
+            "TINY": tiny_count,
+            "SHORT": short_count,
+            "MEDIUM": medium_count,
+            "LONG": long_count
+        }
+       
+
+
 
 
 
