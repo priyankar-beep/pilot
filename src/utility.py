@@ -1,839 +1,626 @@
-import pandas as pd, numpy as np, os
-pd.options.mode.chained_assignment = None  # default='warn'
-import seaborn as sns
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Sep  5 15:40:01 2024
+
+@author: hubble
+"""
+
+import numpy as np, pandas as pd, os, pickle
+from natsort import natsorted
+from scipy.signal import find_peaks
+from datetime import timedelta
 import matplotlib.pyplot as plt
 import plotly.express as px
 import plotly.graph_objects as go
-import plotly.io as pio
-pio.renderers.default = "svg"
+#%%
 
-from datetime import datetime
-from scipy.signal import find_peaks
-from sklearn.manifold import TSNE
-print('...')
-# subject_index_mapping = {0: 'Subject-1', 1:'Subject-2',2:'Subject-3',3:'Subject-4',4:'Subject-5',5:'Subject-5',6:'Subject-7',7:'Subject-8'}
-subject_index_mapping = {0: 'Subject-1', 1:'Subject-2',2:'Subject-3',3:'Subject-7',4:'Subject-8',5:'Subject-9',6:'Subject-11',7:'Subject-12'}
+subjects_threshold_dict = {
+    'subject_1': {
+        'PlugTvHall.csv': 30,
+        'CoffeMachine.csv': None,
+        'Microwave.csv': 1500,
+        'WashingMachine.csv': 1300,
+        'Printer.csv': None,
+        'PlugTvKitchen.csv': None
+    },
+    'subject_2': {
+        'PlugTvHall.csv': 60,
+        'CoffeMachine.csv': None,
+        'Microwave.csv': None,
+        'WashingMachine.csv': None,
+        'Printer.csv': None,
+        'PlugTvKitchen.csv': None
+    },
+    'subject_3': {
+        'PlugTvHall.csv': 15,
+        'CoffeMachine.csv': 800,
+        'Microwave.csv': 1000,
+        'WashingMachine.csv': None,
+        'Printer.csv': 250,
+        'PlugTvKitchen.csv': None
+    },
+    'subject_4': {
+        'PlugTvHall.csv': None,
+        'CoffeMachine.csv': None,
+        'Microwave.csv': 1000,
+        'WashingMachine.csv': None,
+        'Printer.csv': None,
+        'PlugTvKitchen.csv': None
+    },
+    'subject_5': {
+        'PlugTvHall.csv': 45,
+        'CoffeMachine.csv': None,
+        'Microwave.csv': 1200,
+        'WashingMachine.csv': None,
+        'Printer.csv': None,
+        'PlugTvKitchen.csv': None
+    },
+    'subject_7': {
+        'PlugTvHall.csv': 15,
+        'CoffeMachine.csv': None,
+        'Microwave.csv': None,
+        'WashingMachine.csv': None,
+        'Printer.csv': None,
+        'PlugTvKitchen.csv': 15
+    },
+    'subject_8': {
+        'PlugTvHall.csv': 30,
+        'CoffeMachine.csv': 400,
+        'Microwave.csv': None,
+        'WashingMachine.csv': None,
+        'Printer.csv': None,
+        'PlugTvKitchen.csv': None
+    },
+    'subject_9': {
+        'PlugTvHall.csv': 60,
+        'CoffeMachine.csv': 800,
+        'Microwave.csv': None,
+        'WashingMachine.csv': None,
+        'Printer.csv': None,
+        'PlugTvKitchen.csv': None
+    },
+    'subject_11': {
+        'PlugTvHall.csv': 30,
+        'CoffeMachine.csv': None,
+        'Microwave.csv': None,
+        'WashingMachine.csv': None,
+        'Printer.csv': None,
+        'PlugTvKitchen.csv': 15
+    },
+    'subject_12': {
+        'PlugTvHall.csv': 20,
+        'CoffeMachine.csv': None,
+        'Microwave.csv': None,
+        'WashingMachine.csv': None,
+        'Printer.csv': None,
+        'PlugTvKitchen.csv': None
+    },
+    'subject_13': {
+        'PlugTvHall.csv': None,
+        'CoffeMachine.csv': None,
+        'Microwave.csv': 1000,
+        'WashingMachine.csv': 1500,
+        'Printer.csv': None,
+        'PlugTvKitchen.csv': None
+    },
+    'subject_14': {
+        'PlugTvHall.csv': 30,
+        'CoffeMachine.csv': None,
+        'Microwave.csv': None,
+        'WashingMachine.csv': 1300,
+        'Printer.csv': None,
+        'PlugTvKitchen.csv': None
+    }
+}
 
-sensor_files = [
-    "CoffeMachine.csv",
-    "CoffeMachine_events.csv",
-    "Cookware.csv",
-    "Dishes.csv",
-    "Dishes_Glasses.csv",
-    "Dishes_Silverware.csv",
-    "FoodStorage.csv",
-    "FoodStorageKitchen.csv",
-    "FoodStorageLivingRoom.csv",
-    "Freezer.csv",
-    "HouseEntrance.csv",
-    "Hum_Temp_Bath_humidity.csv",
-    "Hum_Temp_Bath_temp.csv",
-    "Stove_Hum_Temp_humidity.csv",
-    "Stove_Hum_Temp_temp.csv",
-    # "Hum_Temp_Stove_humidity.csv",
-    # "Hum_Temp_Stove_temp.csv",
-    "Medicines.csv",
-    "Microwave.csv",
-    "Microwave_events.csv",
-    "MotionBathroom.csv",
-    "MotionBedroom.csv",
-    "MotionDiningTable.csv",
-    "MotionGuestRoom.csv",
-    "MotionKitchen.csv",
-    "MotionLivingRoomSofa.csv",
-    "MotionLivingRoomTablet.csv",
-    "MotionLivingroom.csv",
-    "MotionOffice.csv",
-    "MotionOtherRoom.csv",
-    "MotionOtherroom.csv",
-    "MotionPrimaryBathroom.csv",
-    "MotionSecondaryBathroom.csv",
-    "PlugTvHall.csv",
-    "PlugTvHall_events.csv",
-    "PlugTvKitchen.csv",
-    "Printer.csv",
-    "Refrigerator.csv",
-    "Silverware.csv",
-    "WashingMachine.csv",
-    "printer_events.csv",
-    "washingMachine_events.csv"
-]
-#data_path, subjects, unwanted_values, skip_substrings= data_path, subjects, unwanted_values, skip_substring
-def load_subjectwise_data(data_path, subjects, unwanted_values, skip_substrings):
-    subject_data = []
-    for sub in range(10):
-        subject_sub = subjects[sub]
-        subject_data_path = os.path.join(data_path, subject_sub, 'environmentals')
-        print(subject_data_path)
-    
-        cleaned_data = []
-        c = 0
-        for sen in range(len(sensor_files)):
-            sensor_file = sensor_files[sen]
-            
-            ## Do not pick file with word event in it
-            if any(substring in sensor_file for substring in skip_substrings):
-                continue
-    
-            sensor_file_path = os.path.join(subject_data_path, sensor_file) # This sensor may not be installed so use try-catch
-            try:
-                print('=====>',sen, sensor_file)
-                sensor_df = pd.read_csv(sensor_file_path)
-                sensor_df = sensor_df[~sensor_df['sensor_status'].isin(['unavailable', 'unknown'])]
-                unique_values = set(sensor_df['sensor_status'].unique())
-                ## Idea: if on off is present it is a magnetic sensor, if no on-off present then it is real-valued sensor
-                contains_on = 'on' in unique_values
-                contains_off = 'off' in unique_values
-    
-                if contains_on or contains_off:
-                    sensor_df, _ = preprocess_dataframe(sensor_df) # This function will remove continuous on  or continuous off values
-                else:
-                    sensor_df['sensor_status'] = pd.to_numeric(sensor_df['sensor_status'], errors='coerce')
-                    # sensor_df.to_csv(sensor_file)
-    
-                data_type = sensor_df['sensor_status'].dtype
-    
-                sdf = sensor_df.copy()
-                if data_type == 'float64':
-                    ## Make sure sensor readings are real values
-                    sdf['sensor_status'] = pd.to_numeric(sdf['sensor_status'], errors='coerce')
-                    ## Detect the peak
-                    peaks, sdf = detect_peaks(sdf, 'sensor_status', prominence = 1)
-                    sdf = sdf.rename(columns={'sensor_status': 'sensor_values', 'peak_detected': 'sensor_status'})
-                    sdf = sdf.reset_index(drop=True)
-                    filtered_df = []
-                    # filtered_df = filter_consecutive_on_and_off_in_real_valued_sensor(sdf) ## Only for real-valued sensors
-                    # filtered_df = filtered_df.reset_index(drop=True)
-                    # filtered_df = post_process_sensor_data(filtered_df)
-                    cleaned_data.append({'sensor':sensor_file, 'filtered_df':filtered_df, 'sensor_df':sdf})
-                else:
-                    filtered_df = post_process_sensor_data(sdf)
-                    # filtered_df.to_csv(sensor_file+'.csv')
-                    cleaned_data.append({'sensor':sensor_file, 'filtered_df':filtered_df, 'sensor_df':sdf})
-    
-            except FileNotFoundError:
-                sensor_df = pd.DataFrame()
-                cleaned_data.append({'sensor':sensor_file, 'filtered_df':pd.DataFrame(), 'sensor_df':pd.DataFrame()})
-            except Exception as e:
-                sensor_df = pd.DataFrame()
-                cleaned_data.append({'sensor':sensor_file, 'filtered_df':pd.DataFrame(), 'sensor_df':pd.DataFrame()})
-        subject_data.append(cleaned_data)
-    return subject_data
+#%%
+def collect_csv_files(main_directory):
+    csv_files = []
 
-def remove_unknown_unavailable(data_path):
-    df = pd.read_csv(data_path)
-    unwanted_values = ['unavailable', 'unknown']
-    df.replace(unwanted_values, np.nan, inplace=True)
-    df_cleaned = df.dropna().copy()
-    
-    for i in reversed(list(df_cleaned.index)[1:]):
-        # Compare the current row's sensor status with the previous row's sensor status
-        if df_cleaned.loc[i].sensor_status == df_cleaned.iloc[df_cleaned.index.get_loc(i)-1].sensor_status:
-            # Drop the current row if the statuses match
-            df_cleaned.drop([i], inplace=True)
-            
-    np_array = np.array(df_cleaned, dtype='object')
-    return df_cleaned, np_array
-
-def get_available_months_years(np_array, column_number_with_time = 2):
-    timestamps = np_array[:, column_number_with_time].astype(int)
-    datetime_values = [datetime.fromtimestamp(ts / 1000) for ts in timestamps]
-    dates = pd.to_datetime(datetime_values)
-    periods = dates.to_period('M')
-    unique_periods = np.unique(periods)
-    return unique_periods
-
-def extract_monthly_data(np_array, target_month = '2024-03'):
-    df = pd.DataFrame(np_array, columns=['sensor_id', 'value', 'timestamp', 'subject_id'])
-    df['timestamp'] = pd.to_datetime(df['timestamp'].astype(int), unit='ms')
-    target_period = pd.Period(target_month, freq='M')
-    df.set_index('timestamp', inplace=True)
-    filtered_df = df[df.index.to_period('M') == target_period]
-    indices = filtered_df.index
-    filtered_np_array = filtered_df.reset_index().values
-    return filtered_df, indices, filtered_np_array
-
-def filter_consecutive_on_and_off_in_real_valued_sensor(df):
-    valid_indices = []
-    for i in range(len(df) - 1):
-        if df.loc[i, 'sensor_status'] == 'on' and df.loc[i + 1, 'sensor_status'] == 'off':
-            valid_indices.append(i)
-            valid_indices.append(i + 1)
-    filtered_df = df.iloc[valid_indices]
-    return filtered_df
-
-def time_current_off_and_next_on(df):
-    results = []
-    for i in range(len(df)-1):
-        ts_off = df.loc[i, 'ts_off']
-        next_ts_on = df.loc[i + 1, 'ts_on']
-        results.append({'ts_off': ts_off, 'next_ts_on': next_ts_on, 'difference': np.abs(next_ts_on - ts_off)})
-    return results
-
-def plot_data_with_peaks(df, time_col, value_col, peaks):
-    df[time_col] = pd.to_datetime(df[time_col], unit='ms')
-    df_peaks = df.iloc[peaks]    
-    fig = px.line(df, x=time_col, y=value_col, title='Data with Peaks')
-    fig.add_trace(
-        go.Scatter(
-            x=df_peaks[time_col],
-            y=df_peaks[value_col],
-            mode='markers',
-            name='Peaks',
-            marker=dict(color='red', size=10, symbol='x')
-        )
-    )
-    fig.update_layout(
-        xaxis_title='Timestamp',
-        yaxis_title='Value',
-        legend_title='Legend',
-        template='plotly_white'
-    )
-    fig.update_yaxes(range=[df[value_col].min() - 1, df[value_col].max() + 1])
-    fig.show()
-
-
-def filter_sensors_by_window(df, start_time, end_time):
-    # Convert 'ts_on' and 'ts_off' to datetime if they aren't already
-    df['ts_on'] = pd.to_datetime(df['ts_on'])
-    df['ts_off'] = pd.to_datetime(df['ts_off'])
-    
-    # Convert start_time and end_time to datetime
-    start_time = pd.to_datetime(start_time)
-    end_time = pd.to_datetime(end_time)
-    
-    # Filter rows where the sensor was active in the window
-    active_sensors = df[((df['ts_on'] <= end_time) & (df['ts_off'] >= start_time))]
-    
-    return active_sensors
-
-def filter_data_for_date(df, date_str):
-    date = pd.to_datetime(date_str)
-    filtered_df = df[(df['ts_on'].dt.date == date.date()) | (df['ts_off'].dt.date == date.date())]
-    # filtered_df = df.loc[(df['ts_on'].dt.date == date) | (df['ts_off'].dt.date == date)]
-
-    if filtered_df.empty:
-        # print(f"No data found for the date: {date_str}")
-        return filtered_df
-    else:
-        return filtered_df
-    
-def prepare_plot_data(date_specific_data):
-    plot_data = []
-    
-    for entry in date_specific_data:
-        sensor_name = entry['sensor']
-        sensor_data = entry['data']
+    for subject_folder in natsorted(os.listdir(main_directory)):
+        subject_path = os.path.join(main_directory, subject_folder)
         
-        if not sensor_data.empty:
-            # Extracting the active periods
-            for index, row in sensor_data.iterrows():
-                plot_data.append({
-                    'sensor': sensor_name,
-                    'start_time': row['ts_on'],
-                    'end_time': row['ts_off']
-                })
-    
-    return pd.DataFrame(plot_data)
-
-def plot_tsne(sample_size, data):
-    # Aggregate data into samples
-    aggregated_data = []
-    for i in range(0, len(data), sample_size):
-        sample = data[i:i+sample_size]
-        if len(sample) == sample_size:
-            aggregated_data.append(sample['sensor_status'].values)
-    aggregated_data = np.array(aggregated_data)
-    
-    # Apply t-SNE
-    tsne = TSNE(n_components=2, perplexity=5, random_state=0)
-    tsne_results = tsne.fit_transform(aggregated_data)
-    
-    # Plot the t-SNE results
-    plt.figure(figsize=(12, 8))
-    plt.scatter(tsne_results[:, 0], tsne_results[:, 1], cmap='viridis', alpha=0.6)
-    plt.colorbar(label='Sensor Status')
-    plt.xlabel('t-SNE Feature 1')
-    plt.ylabel('t-SNE Feature 2')
-    plt.title(f't-SNE Plot with Sample Size {sample_size}')
-    plt.show()
-
-def remove_unknown_unavailable_v2(df):
-    unwanted_values = ['unavailable', 'unknown']
-    df.replace(unwanted_values, np.nan, inplace=True)
-    df_cleaned = df.dropna().copy()
-    
-    for i in reversed(list(df_cleaned.index)[1:]):
-        # Compare the current row's sensor status with the previous row's sensor status
-        if df_cleaned.loc[i].sensor_status == df_cleaned.iloc[df_cleaned.index.get_loc(i)-1].sensor_status:
-            # Drop the current row if the statuses match
-            df_cleaned.drop([i], inplace=True)
+        if os.path.isdir(subject_path):
+            environmentals_path = os.path.join(subject_path, 'environmentals')
             
-    np_array = np.array(df_cleaned, dtype='object')
-    return df_cleaned, np_array
+            if os.path.exists(environmentals_path):
+                for file in os.listdir(environmentals_path):
+                    # Check if the file is a CSV file
+                    if file.endswith('.csv'):
+                        csv_files.append(file)
+    csv_files = set(csv_files)
+    return csv_files
 
-    
-def detect_peaks(df, value_col, prominence_value):
-    peaks, properties = find_peaks(df[value_col], prominence=prominence_value)
-    peak_indicator = ['off'] * len(df)
-    for peak in peaks:
-        if peak < len(peak_indicator):
-            peak_indicator[peak] = 'on'
-    df['peak_detected'] = peak_indicator
-    return peaks,df
+def process_sensor_data(df):
+    if df.iloc[0].sensor_status == "off":
+        df = df.iloc[1:]
 
-def plot_duration_distribution(on_off_diff):
-    # Convert the list to a DataFrame
-    df = pd.DataFrame(on_off_diff, columns=['end_time', 'start_time', 'duration'])
-    
-    # Ensure the time columns are in datetime format
-    df['start_time'] = pd.to_datetime(df['start_time'])
-    df['end_time'] = pd.to_datetime(df['end_time'])
-    
-    # Calculate the duration in seconds and minutes
-    df['duration_seconds'] = (df['end_time'] - df['start_time']).dt.total_seconds()
-    df['duration_minutes'] = df['duration_seconds'] / 60
-    
-    # Create bins of five minutes up to 120 minutes, and include one bin for > 2 hours
-    bins = list(range(0, 120, 5)) + [float('inf')]
-    labels = [f"{i}-{i+5} min" for i in range(0, 115, 5)] + [">120 min"]
-    
-    # Bin the data
-    df['binned_duration'] = pd.cut(df['duration_minutes'], bins=bins, labels=labels, right=False)
-    
-    # Check for NaNs in the binned_duration
-    if df['binned_duration'].isna().any():
-        print("Some durations couldn't be binned. Please check the data.")
-    
-    # Count the number of occurrences in each bin
-    bin_counts = df['binned_duration'].value_counts(sort=False).reset_index()
-    bin_counts.columns = ['binned_duration', 'count']
-    
-    # Plot using plotly
-    fig = px.bar(bin_counts, x='binned_duration', y='count', title='Distribution of Durations',
-                 labels={'binned_duration': 'Duration Bins', 'count': 'Count'})
-    fig.update_layout(xaxis_tickangle=-45)
-    fig.show()
+    mask_on = (df['sensor_status'] == 'on')
+    mask_off = (df['sensor_status'] == 'off')
 
-
-def post_process_sensor_data(df):
-    # Check if the first row's sensor_status is 'off', and remove it if true because I want to start my analysis from ON
-    if df.iloc[0]['sensor_status'] == 'off':
-        df = df.iloc[1:].reset_index(drop=True)
-
-    # print(np.unique(df['sensor_status']))
-    # Create masks for filtering 'on' and 'off' statuses
-    mask_on = df['sensor_status'] == 'on'
-    mask_off = df['sensor_status'] == 'off'
-
-    # Separate DataFrames for 'on' and 'off' statuses
     df_on = df[mask_on].copy()
     df_off = df[mask_off].copy()
 
-    # # Rename timestamp columns
-    df_on.rename(columns={'ts': 'ts_on_ms'}, inplace=True)  # Keep original milliseconds
-    df_off.rename(columns={'ts': 'ts_off_ms'}, inplace=True)  # Keep original milliseconds
-            
-    df_on['ts_on'] = pd.to_datetime(df_on['ts_on_ms'], unit='ms')
-    df_off['ts_off'] = pd.to_datetime(df_off['ts_off_ms'], unit='ms')
+    df_on.rename(columns={'ts': 'ts_on'}, inplace=True)
+    df_off.rename(columns={'ts': 'ts_off'}, inplace=True)
 
-    # # Reset index for merging
-    df_on.reset_index(drop=True, inplace=True)
-    df_off.reset_index(drop=True, inplace=True)
+    df_on.reset_index(inplace=True, drop=True)
+    df_off.reset_index(inplace=True, drop=True)
 
-    df_conc = pd.merge(df_on, df_off[['ts_off_ms', 'ts_off']], left_index=True, right_index=True)    
+    df_conc = pd.concat([df_on, df_off['ts_off']], axis=1)
 
-    # # Calculate duration
-    df_conc['duration_readable'] = df_conc['ts_off'] - df_conc['ts_on']
-    df_conc['duration_ms'] = df_conc['ts_off_ms'] - df_conc['ts_on_ms']
-    
-    new_order = ['sensor_id', 'subject_id', 'ts_on', 'ts_off', 'duration_readable', 'ts_on_ms', 'ts_off_ms', 'duration_ms', 'sensor_status']
-    df_conc = df_conc[new_order]    
+    df_conc['duration_ms'] = df_conc['ts_off'] - df_conc['ts_on']
+
+    df_conc['ts_on'] = pd.to_datetime(df_conc['ts_on'], unit='ms')
+    df_conc['ts_off'] = pd.to_datetime(df_conc['ts_off'], unit='ms')
+
+    df_conc['duration_datetime'] = df_conc['ts_off'] - df_conc['ts_on']
+
+    df_conc['ts_on_ms'] = df_conc['ts_on'].astype('int64') // 10**6  # Convert datetime to milliseconds
+    df_conc['ts_off_ms'] = df_conc['ts_off'].astype('int64') // 10**6  # Convert datetime to milliseconds
+
+    df_conc = df_conc[['sensor_id', 'subject_id', 'sensor_status', 'ts_on_ms', 'ts_off_ms', 'ts_on', 'ts_off', 'duration_ms', 'duration_datetime']]
+
     return df_conc
+def remove_continuous_on_off(df_cleaned_1):
+    df_cleaned = df_cleaned_1.copy()
     
-def preprocess_dataframe(df):
-    unwanted_values = ['unavailable', 'unknown']
-    df.replace(unwanted_values, np.nan, inplace=True)
-    df_cleaned = df.dropna().copy()
+    contains_on = df_cleaned['sensor_status'].isin(['on']).any()
+    contains_off = df_cleaned['sensor_status'].isin(['off']).any()
     
-    for i in reversed(list(df_cleaned.index)[1:]):
-        # Compare the current row's sensor status with the previous row's sensor status
-        if df_cleaned.loc[i].sensor_status == df_cleaned.iloc[df_cleaned.index.get_loc(i)-1].sensor_status:
-            # Drop the current row if the statuses match
-            df_cleaned.drop([i], inplace=True)
-            
-    np_array = np.array(df_cleaned, dtype='object')
-    return df_cleaned, np_array    
-
-
-def filter_data_for_month(df, month_str):
-    
-    # Convert the month string to a datetime object
-    month = pd.to_datetime(month_str, format='%Y-%m')
-
-    # Filter the DataFrame based on the month and year
-    filtered_df = df[(df['ts_on'].dt.year == month.year) & (df['ts_on'].dt.month == month.month) |
-                     (df['ts_off'].dt.year == month.year) & (df['ts_off'].dt.month == month.month)]
-    filtered_df = filtered_df.reset_index(drop=True)
-    # print(filtered_df)
-    # Check if the filtered DataFrame is empty
-    if filtered_df.empty:
-        return filtered_df  # Return the empty DataFrame if no data is found
-    else:
-        return filtered_df  # Return the filtered DataFrame
-    
-def remove_continuous_on_off(df_cleaned):    
-    for i in reversed(list(df_cleaned.index)[1:]):
-            # Compare the current row's sensor status with the previous row's sensor status
+    if contains_on and contains_off:
+        isEnvironmentalSensor = True
+        for i in reversed(list(df_cleaned.index)[1:]):
             if df_cleaned.loc[i].sensor_status == df_cleaned.iloc[df_cleaned.index.get_loc(i)-1].sensor_status:
-                # Drop the current row if the statuses match
                 df_cleaned.drop([i], inplace=True)
-    return df_cleaned
-
-def plot_duration_distribution2(on_off_diff, bin_duration=30, next_on_time=None, current_off_time=None):
-    # Convert the list to a DataFrame
-    df = pd.DataFrame(on_off_diff, columns=['end_time', 'start_time', 'duration'])
-    
-    # Ensure the time columns are in datetime format
-    df['start_time'] = pd.to_datetime(df['start_time'])
-    df['end_time'] = pd.to_datetime(df['end_time'])
-    
-    # Calculate the duration in seconds and minutes
-    df['duration_seconds'] = (df['end_time'] - df['start_time']).dt.total_seconds()
-    df['duration_minutes'] = df['duration_seconds'] / 60
-    
-    # Create bins based on the bin_duration and add a bin for durations greater than the max bin
-    max_bin = (120 // bin_duration) * bin_duration
-    bins = list(range(0, max_bin + bin_duration, bin_duration)) + [float('inf')]
-    labels = [f"{i}-{i+bin_duration} min" for i in range(0, max_bin, bin_duration)] + [f">{max_bin} min"]
-    
-    # Bin the data
-    df['binned_duration'] = pd.cut(df['duration_minutes'], bins=bins, labels=labels, right=False)
-    
-    # Check for NaNs in the binned_duration
-    if df['binned_duration'].isna().any():
-        print("Some durations couldn't be binned. Please check the data.")
-    
-    # Count the number of occurrences in each bin
-    bin_counts = df['binned_duration'].value_counts(sort=False).reset_index()
-    bin_counts.columns = ['binned_duration', 'count']
-    
-    # Plot using plotly
-    fig = px.bar(bin_counts, x='binned_duration', y='count', title='Distribution of Durations',
-                 labels={'binned_duration': 'Duration Bins', 'count': 'Count'})
-    
-    # Add annotations for next_on_time and current_off_time
-    annotations = []
-    
-    if next_on_time is not None:
-        annotations.append(
-            go.layout.Annotation(
-                xref="paper",
-                yref="paper",
-                x=0.5,
-                y=-0.2,
-                text=f"Next On Time: {next_on_time}",
-                showarrow=False,
-                font=dict(size=12, color="black")
-            )
-        )
-    
-    if current_off_time is not None:
-        annotations.append(
-            go.layout.Annotation(
-                xref="paper",
-                yref="paper",
-                x=0.5,
-                y=-0.3,
-                text=f"Current Off Time: {current_off_time}",
-                showarrow=False,
-                font=dict(size=12, color="black")
-            )
-        )
-    
-    fig.update_layout(xaxis_tickangle=-45, annotations=annotations)
-    
-    fig.show()
-    
-#%%
-def timedelta_to_seconds(td):
-    return td.total_seconds()
-
-def create_combined_df(out_event_counts, peak_counts, all_dates):
-    combined_data = {'Date': all_dates}
-    combined_data['Out Events'] = get_values_for_dates({date: count for month_data in out_event_counts.values() for date, count in month_data.items()}, all_dates)
-    combined_data['Peaks'] = get_values_for_dates({date: count for month_data in peak_counts.values() for date, count in month_data.items()}, all_dates)
-    return pd.DataFrame(combined_data)
-
-# Function to get values for dates
-def get_values_for_dates(data_dict, all_dates):
-    return [data_dict.get(date, 0) for date in all_dates]
-
-# Plot the data
-def plot_out_event_and_peak_counts(combined_df, month, sn, kk):
-    if kk == 13:
-        temp_str = 'Temperature Peaks'
-    elif kk ==12:
-        temp_str = 'Humidity Peaks'
-        
-    plt.figure(figsize=(14, 7))
-
-    x = np.arange(len(combined_df['Date']))  # X locations for the groups
-    bar_width = 0.4  # Width of the bars
-
-    # Plot bars
-    plt.bar(x - bar_width / 2, combined_df['Out Events'], bar_width, label='Probable Out Events', alpha=0.7)
-    plt.bar(x + bar_width / 2, combined_df['Peaks'], bar_width, label=temp_str, alpha=0.7)
-
-    # Format x-axis
-    plt.xticks(x, combined_df['Date'], rotation=90)
-    plt.gca().xaxis.set_major_locator(plt.MaxNLocator(nbins=10))
-    
-    # Add titles and labels
-    plt.title(f'Probable Out-Events and Peak Counts for {month} and for '+str(subject_index_mapping[sn]))
-    plt.xlabel('Date')
-    plt.ylabel('Count')
-
-    # Add grid for better readability
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
-
-    # Show legend
-    plt.legend()
-
-    # Display the plot
-    plt.tight_layout()
-    plt.savefig('out_events_and_peak_count'+str(month)+'_'+str(subject_index_mapping[sn])+'.png')
-
-    plt.show()
-
-
-def background_subtraction_denoise(df, background_method='median', window_size=5):
-    df = df.copy()
-
-    # Ensure that sensor_value is numeric
-    df['sensor_values'] = pd.to_numeric(df['sensor_values'], errors='coerce')
-
-    # Sort the DataFrame by timestamp for consistent rolling
-    df = df.sort_values(by='ts')
-    df['ts'] = pd.to_datetime(df['ts'], unit = 'ms',errors='coerce')
-
-
-    # Calculate the background based on the chosen method
-    if background_method == 'mean':
-        df['background'] = df['sensor_values'].rolling(window=window_size, center=True, min_periods=1).mean()
-    elif background_method == 'median':
-        df['background'] = df['sensor_values'].rolling(window=window_size, center=True, min_periods=1).median()
+                # print(i)
     else:
-        raise ValueError("background_method must be either 'mean' or 'median'")
+        isEnvironmentalSensor = False
+    return df_cleaned, isEnvironmentalSensor
 
-    # Subtract the background from the original sensor value to get the denoised signal
-    df['denoised_sensor_value'] = df['sensor_values'] - df['background']
-    df['denoised_sensor_value'] = df['denoised_sensor_value'].apply(lambda x: max(x, 0))
-    return df
 
-#dff, peaks = df_with_peaks, peaks
-def plot_raw_sensor_values(dff,peaks=None): 
-    import matplotlib.dates as mdates
-    plt.figure(figsize=(14, 7))
-    dff['ts'] = pd.to_datetime(dff['ts'], unit='ms')
-    plt.plot(dff['ts'], dff['sensor_values'], label='Sensor Values', color='blue')
-    
-    
-    if peaks is not None:
-        plt.scatter(dff.iloc[peaks]['ts'], dff.iloc[peaks]['sensor_values'], color='red', label='Peaks', zorder=5)
+def get_threshold_value(subject_dict, subject, file):
+    if subject in subject_dict:
+        subject_files = subject_dict[subject]
+        if file in subject_files:
+            return subject_files[file]
+    return None
 
-    unique_dates = dff['datetime'].dt.date.unique()
-    # print(unique_dates)
-    for date in unique_dates:
-        start_of_day = pd.Timestamp(date)
-        end_of_day = pd.Timestamp(date) + pd.Timedelta(days=1)
+def convert_real_valued_to_on_off(threshold_value, df):
+    if threshold_value is not None:
+        ts_on_list = []
+        ts_off_list = []
+        temp_list = []
         
-        plt.axvline(x=start_of_day, color='gray', linestyle='--', alpha=0.6)
-        plt.axvline(x=end_of_day, color='gray', linestyle='--', alpha=0.6)
+        is_on = False
+        ts_on = None
+        ind1 = None
+        ind2 = None
+        for index, row in df.iterrows():
+            sensor_value = row['sensor_status']                                    
+            if is_on == False and sensor_value > threshold_value:
+                # Detect the first value above the threshold and mark it as ts_on
+                ts_on = row['ts']
+                is_on = True
+                ind1 = index
+                
+            if is_on == True and sensor_value < threshold_value:
+                # Detect the first value below the threshold and mark it as ts_off
+                ind2 = index
+                ts_off = row['ts']
+                ts_on_list.append(ts_on)
+                ts_off_list.append(ts_off)
+                temp_list.append([ind1, row['sensor_id'], 'on', ts_on, row['subject_id'], pd.to_datetime(ts_on,unit='ms')])
+                temp_list.append([ind2, row['sensor_id'], 'off', ts_off, row['subject_id'],pd.to_datetime(ts_off,unit = 'ms')])
+                is_on = False
+
+        result_df = pd.DataFrame(temp_list, columns=['index','sensor_id','sensor_status', 'ts', 'subject_id','ts_datetime'])
+        return result_df
+    
+def read_csv_files(data_path):
+    subjects = natsorted(os.listdir(data_path))
+    milliseconds_in_2_hours = 2 * 60 * 60 * 1000
+    subject_dfs = {}
+    for s in range(len(subjects)):
+        print('-*'*40)
+        subject_s = subjects[s]
+        path_subject = os.path.join(data_path, subject_s, 'environmentals')
+        environmentals_sensors = natsorted(os.listdir(path_subject))
+        
+        dfs_dict = {}
+        for es in range(len(environmentals_sensors)):
+            filename = environmentals_sensors[es]
+            if '_events' in filename:
+                continue
+            
+            if filename.endswith('.csv') and not filename.startswith('.~lock'):
+                print(os.path.join(path_subject, filename))
+                df = pd.read_csv(os.path.join(path_subject, filename))
+                df['ts'] = df['ts'] + milliseconds_in_2_hours
+                if len(df) > 0:
+                    df = df[~df['sensor_status'].isin(['unavailable', 'unknown'])]    
+                    df.reset_index(drop=True, inplace=True)
+                    df, isEnvironmentalSensor = remove_continuous_on_off(df)
+                    df['ts_datetime'] = pd.to_datetime(df['ts'], unit='ms')
+                    
+                    if not isEnvironmentalSensor:
+                        if filename in ['Shower_Hum_Temp_temp.csv', 'Shower_Hum_Temp_humidity.csv', 'Stove_Hum_Temp_temp.csv', 'Stove_Hum_Temp_humidity.csv']:
+                            df['sensor_status'] = pd.to_numeric(df['sensor_status'], errors='coerce')
+                            dfs_dict[filename] = [df, pd.DataFrame()]
+                        else:   
+                            threshold_value = get_threshold_value(subjects_threshold_dict, subject_s, filename)
+                            df['sensor_status'] = pd.to_numeric(df['sensor_status'], errors='coerce')
+                            df = convert_real_valued_to_on_off(threshold_value, df)  
+                            df_processed = process_sensor_data(df)
+                            dfs_dict[filename] = [df, df_processed]
+                    else:
+                        df_processed = process_sensor_data(df)
+                        dfs_dict[filename] = [df, df_processed]
+        subject_dfs[subject_s] = dfs_dict
+    return subject_dfs
+
+# def count_virtual_out_events(house_entrance, data_subject_1, year = None, month = None, st = None, et = None):
+#     if year != None and month != None:
+#         # print('+-'*20)
+#         house_entrance = house_entrance[(house_entrance['ts_on'].dt.year == year) & (house_entrance['ts_on'].dt.month == month)]
+#         if st != None and et != None:
+#             # print('xxxxxxxxxxxxxx')
+#             house_entrance = house_entrance[
+#                 (house_entrance['ts_on'].dt.time >= st) &
+#                 (house_entrance['ts_on'].dt.time < et)]   
+#         # print(house_entrance)
+#     out_event_timimg = []
+#     out_event_count = 0
+#     for he in range(1, len(house_entrance)):
+#         # print('-------------------------------')
+#         ws = house_entrance.iloc[he-1]['ts_off']
+#         we = house_entrance.iloc[he]['ts_on']
+#         # print(he, ws, we)
+#         is_out_event = True
+        
+#         for j in range(len(environmental_sensors)):
+#             sensor_name = environmental_sensors[j]
+#             # print(j ,sensor_name)
+#             if sensor_name not in ['HouseEntrance.csv','Hum_Temp_Bath_humidity.csv', 'Hum_Temp_Bath_temp.csv', 'Hum_Temp_Stove_humidity.csv', 'Hum_Temp_Stove_temp.csv']: 
+#                 sensor_df_raw = data_subject_1[sensor_name][0]
+#                 sensor_df_processed = data_subject_1[sensor_name][1]
+                
+#                 ## I can not work on the sensors which provide real values because they are being utilized or not,
+#                 ## they will always provide some real values. Instead I have to utilize on those sensors which provide values
+#                 ## like on and off
+                
+#                 if len(sensor_df_processed) > 0:
+#                     temp_df = sensor_df_processed[(sensor_df_processed['ts_on'] >= ws) & (sensor_df_processed['ts_on'] <= we)]
+#                     # print(sensor_name, len(temp_df))
+#                     if not temp_df.empty:
+#                         is_out_event = False
+#                         # print('----------')
+#                         break
+                    
+#         if is_out_event == True:
+#             out_event_count = out_event_count + 1
+#             out_event_timimg.append((he,ws,we))
+            
+#     return out_event_count, out_event_timimg
+
+# he_Df = house_entrance.copy()
+# house_entrance = he_Df.copy()
+def determine_sensor_case(ws, we, ts_on, ts_off):
+    # Case 1: Sensor turned on and off inside the window
+    if ws <= ts_on <= we and ws <= ts_off <= we:
+        return 1
+    
+    # Case 2: Sensor turned on before and off after the window
+    elif ts_on < ws and ts_off > we:
+        return 2
+    
+    # Case 3: Sensor turned on inside the window and off after the window
+    elif ws <= ts_on <= we and ts_off > we:
+        return 3
+    
+    # Case 4: Sensor turned on before the window and off inside the window
+    elif ts_on < ws and ws <= ts_off <= we:
+        return 4
+    
+    # If none of the cases match, return None
+    return None
+
+def count_virtual_out_events(house_entrance, data_subject_1, year=None, month=None, st=None, et=None):
+        
+
+    house_entrance_df = []
+    for m in range(1 , len(house_entrance)):
+        house_entrance_df.append((house_entrance.iloc[m-1]['ts_off'],house_entrance.iloc[m]['ts_on']))
+        
+    house_entrance_df  = pd.DataFrame(house_entrance_df, columns = ['ws', 'we'])
+    house_entrance_df_year_month = house_entrance_df[(house_entrance_df['ws'].dt.year == year) & (house_entrance_df['ws'].dt.month == month)]
+    ## make windows
+    
+    if st is not None and et is not None:
+        sub_df = house_entrance_df_year_month[
+            (house_entrance_df_year_month['ws'].dt.time >= st) &
+            (house_entrance_df_year_month['ws'].dt.time < et)]
+    else:
+        sub_df = house_entrance_df_year_month.copy()
+    
+    out_event_timimg = []
+    out_event_count = 0
+    inside_home_timings = []
+    for he in range(len(sub_df)):
+        ws = sub_df.iloc[he]['ws']
+        we = sub_df.iloc[he]['we']
+        duration = (we - ws).total_seconds() / 60
+        
+        is_out_event = True
+        for j in range(len(environmental_sensors)):
+            sensor_name = environmental_sensors[j]
+            
+            # Check if the sensor is not in the excluded list
+            if sensor_name in ['HouseEntrance.csv', 'Shower_Hum_Temp_humidity.csv', 'Shower_Hum_Temp_temp.csv', 'Stove_Hum_Temp_humidity.csv', 'Stove_Hum_Temp_temp.csv']:
+                continue
+            
+            sensor_df_raw = data_subject_1[sensor_name][0]
+            sensor_df_processed = data_subject_1[sensor_name][1]
+            
+            if len(sensor_df_processed) > 0:
+                if 'Motion' not in sensor_name:
+                    temp_df = sensor_df_processed[(sensor_df_processed['ts_on'] <= we) & (sensor_df_processed['ts_off'] >= ws)]
+                    if not temp_df.empty:
+                        # print(j, sensor_name)
+                        for r in range(len(temp_df)):
+                            ts_on, ts_off = temp_df.iloc[r]['ts_on'], temp_df.iloc[r]['ts_off']
+                            case_value = determine_sensor_case(ws, we, ts_on, ts_off)
+                            if case_value in [1,3,4]:
+                                print(j, sensor_name)
+                                is_out_event = False
+                                break
+                            
+                else:#if 'Motion' in sensor_name:
+                    temp_df = sensor_df_processed[(sensor_df_processed['ts_on'] <= we) & (sensor_df_processed['ts_off'] >= ws)]
+                    if not temp_df.empty:
+                        for r in range(len(temp_df)):
+                            ts_on, ts_off = temp_df.iloc[r]['ts_on'], temp_df.iloc[r]['ts_off']
+                            case_value = determine_sensor_case(ws, we, ts_on, ts_off)
+                            if case_value in [1,3]:
+                                print(j, sensor_name)
+                                is_out_event = False
+                                break
+                                
+        if is_out_event:            
+            out_event_count += 1
+            out_event_timimg.append((he, ws, we))               
+                
+
+    return out_event_count, out_event_timimg, inside_home_timings
+
+
+
+# def count_virtual_out_events(house_entrance, data_subject_1, year=None, month=None, st=None, et=None):
+#     if year is not None and month is not None:
+#         house_entrance = house_entrance[(house_entrance['ts_on'].dt.year == year) & (house_entrance['ts_on'].dt.month == month)]
+#         if st is not None and et is not None:
+#             house_entrance = house_entrance[
+#                 (house_entrance['ts_on'].dt.time >= st) &
+#                 (house_entrance['ts_on'].dt.time < et)]
+    
+#     out_event_timimg = []
+#     out_event_count = 0
+#     inside_home_timings = []
+#     for he in range(1, len(house_entrance)):
+#         ws = house_entrance.iloc[he-1]['ts_off']
+#         we = house_entrance.iloc[he]['ts_on']
+#         duration = (we - ws).total_seconds() / 60
+        
+#         # Only proceed if the duration is greater than 10 minutes
+#         # if duration > 10:
+#         is_out_event = True
+#         temp = {}
+#         for j in range(len(environmental_sensors)):
+#             sensor_name = environmental_sensors[j]
+            
+#             if sensor_name not in ['HouseEntrance.csv','Shower_Hum_Temp_humidity.csv', 'Shower_Hum_Temp_temp.csv', 'Stove_Hum_Temp_humidity.csv', 'Stove_Hum_Temp_temp.csv']: 
+#                 # print(sensor_name)
+#                 sensor_df_raw = data_subject_1[sensor_name][0]
+#                 sensor_df_processed = data_subject_1[sensor_name][1]
+                
+#                 if len(sensor_df_processed) > 0:
+#                     temp_df = sensor_df_processed[(sensor_df_processed['ts_on'] >= ws) & (sensor_df_processed['ts_off'] <= we)]
+#                     # temp_df = sensor_df_processed[(sensor_df_processed['ts_on'] <= we) & (sensor_df_processed['ts_off'] >= ws)]
+#                     if not temp_df.empty:
+#                         is_out_event = False
+#                         temp[sensor_name] = temp_df
+                        
+#                         break
+                    
+#         inside_home_timings.append(temp)
+#         if is_out_event:
+#             out_event_count += 1
+#             out_event_timimg.append((he, ws, we))
+
+#     return out_event_count, out_event_timimg, inside_home_timings
+
+      
+
+def detect_peaks(df, value_col='sensor_status', prominence=1.5):
+    if value_col not in df.columns:
+        return [], df 
+    df1 = df.copy()
+    peaks, properties = find_peaks(df1[value_col], prominence=prominence)
+    peak_indicator = [0] * len(df1)
+    for peak in peaks:
+        peak_indicator[peak] = 1
+    df1['peak_detected'] = peak_indicator
+    return peaks,df1
+
+def count_peaks(data_subject_1, sensor_file, year = None, month = None, prominence = 1.5, st=None, et = None):
+    if sensor_file in data_subject_1:
+        temperatue_data = data_subject_1[sensor_file][0].copy()  
+        # 
+        if year != None and month != None:
+            temperatue_data_ym = temperatue_data[(temperatue_data['ts_datetime'].dt.year == year) & (temperatue_data['ts_datetime'].dt.month == month)].copy()
+            tData = temperatue_data_ym.copy()
+            if st != None and et !=None:
+                # print('xxxxxxxxxxxx')
+                temperatue_data_stet = temperatue_data_ym[
+                    (temperatue_data_ym['ts_datetime'].dt.time >= st) &
+                    (temperatue_data_ym['ts_datetime'].dt.time <= et)] 
+                tData = temperatue_data_stet.copy()
+                
+            # print(temperatue_data)
+        peaks, df_temperature_data= detect_peaks(tData, 'sensor_status', prominence=prominence)  
+        selected_df = temperatue_data.loc[peaks, ['ts_datetime', 'sensor_status']]
+        
+        # Output the result
+        # print(selected_df)
+        peak_count = len(peaks)
+    else:
+        peak_count = 0
+        peaks = []
+        df_temperature_data = pd.DataFrame()
+    return peak_count, peaks, df_temperature_data
     
     
-    # Add titles and labels
-    plt.title('Sensor Values Over Time')
+# def plot_signal_with_peaks(df_with_humidity_peaks, peaks_humidity, sensor_name):
+#     # Plot the sensor status (signal)
+#     plt.figure(figsize=(14, 7))
+#     plt.plot(df_with_humidity_peaks['ts_datetime'], df_with_humidity_peaks['sensor_status'], label= sensor_name, color='blue')
+    
+#     # Highlight the peaks
+#     plt.plot(df_with_humidity_peaks['ts_datetime'].iloc[peaks_humidity], 
+#              df_with_humidity_peaks['sensor_status'].iloc[peaks_humidity], 
+#              'ro', label='Peaks')
+    
+#     # Add labels and title
+#     plt.xlabel('Timestamp')
+#     plt.ylabel('Sensor Value')
+#     plt.title('Signal with Detected Peaks')
+#     plt.legend()
+
+#     # Display the plot
+#     plt.show()
+
+def plot_signal_with_peaks(df_with_humidity_peaks, peaks_humidity, df_with_temperature_peaks, peaks_temperature, humidity_sensor_name, temperature_sensor_name, subject_name, year, month):
+    plt.figure(figsize=(14, 7))
+
+    # Plot the humidity sensor status (signal)
+    plt.plot(df_with_humidity_peaks['ts_datetime'], df_with_humidity_peaks['sensor_status'], 
+             label= 'Humidity Values', color='blue')
+    
+    # Highlight the peaks in humidity
+    plt.plot(df_with_humidity_peaks['ts_datetime'].iloc[peaks_humidity], 
+             df_with_humidity_peaks['sensor_status'].iloc[peaks_humidity], 
+             'bo', label='Humidity Peaks')
+    
+    # Plot the temperature sensor status (signal)
+    plt.plot(df_with_temperature_peaks['ts_datetime'], df_with_temperature_peaks['sensor_status'], 
+             label='Temperature Values', color='red')
+    
+    # Highlight the peaks in temperature
+    plt.plot(df_with_temperature_peaks['ts_datetime'].iloc[peaks_temperature], 
+             df_with_temperature_peaks['sensor_status'].iloc[peaks_temperature], 
+             'ro', label='Temperature Peaks')
+
+    # Add vertical lines at the start and end of each day
+    day_starts = df_with_humidity_peaks['ts_datetime'].dt.floor('D').drop_duplicates()
+    for day in day_starts:
+        plt.axvline(x=day, color='green', linestyle='--', alpha=0.5)
+        plt.axvline(x=day + pd.Timedelta(days=1) - pd.Timedelta(seconds=1), color='green', linestyle='--', alpha=0.5)
+
+    # Add labels and title
     plt.xlabel('Timestamp')
     plt.ylabel('Sensor Value')
-    
-    # Format x-axis to show each date properly
-    plt.gca().xaxis.set_major_locator(mdates.DayLocator())
-    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
-
-    # Rotate x-axis labels by 90 degrees for better space management
-    plt.xticks(rotation=90, ha='center')
-
-    # Add grid for better readability
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
-
-    # Show legend
+    plt.title('Humidity and Temperature Signals with Detected Peaks for ' + subject_name)
     plt.legend()
-
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig(f'{subject_name}_{year}_{month}.png')
     # Display the plot
-    plt.tight_layout()
     plt.show()
 
+# def plot_event_and_peak_counts(all_out_event_counts, all_temperature_peak_counts, all_humidity_peak_counts, subject_name, strng):
+#     months_years = []
+#     out_event_counts = []
+#     temperature_peak_counts = []
+#     humidity_peak_counts = []
 
-def plot_denoised_sensor_values(dff,peaks=None): 
-    import matplotlib.dates as mdates
+#     # Iterate over years and months, combining all counts
+#     for year in sorted(set(all_out_event_counts.keys()).union(all_temperature_peak_counts.keys()).union(all_humidity_peak_counts.keys())):
+#         for month in sorted(set(all_out_event_counts.get(year, {}).keys())
+#                             .union(all_temperature_peak_counts.get(year, {}).keys())
+#                             .union(all_humidity_peak_counts.get(year, {}).keys())):
+#             month_year_str = f"{month:02d}-{year}"
+#             months_years.append(month_year_str)
+#             out_event_counts.append(all_out_event_counts.get(year, {}).get(month, 0))
+#             temperature_peak_counts.append(all_temperature_peak_counts.get(year, {}).get(month, 0))
+#             humidity_peak_counts.append(all_humidity_peak_counts.get(year, {}).get(month, 0))
 
-    plt.figure(figsize=(14, 7))
+#     x = np.arange(len(months_years))  # the label locations
+#     width = 0.3  # the width of the bars (adjusted for three bars)
 
-    # Plot the denoised sensor values
-    plt.plot(dff['ts'], dff['denoised_sensor_value'], label='Denoised Sensor Value', color='blue')
-    
-    if peaks is not None:
-        plt.scatter(dff.iloc[peaks]['ts'], dff.iloc[peaks]['denoised_sensor_value'], color='red', label='Peaks', zorder=5)
+#     fig, ax = plt.subplots(figsize=(14, 7))
+#     bars1 = ax.bar(x - width, out_event_counts, width, label='Probable Out Events', color='red')
+#     bars2 = ax.bar(x, temperature_peak_counts, width, label='Temperature Peaks', color='blue')
+#     bars3 = ax.bar(x + width, humidity_peak_counts, width, label='Humidity Peaks', color='green')
 
+#     # Customize the plot
+#     ax.set_xlabel('Month-Year', fontsize=16)
+#     ax.set_ylabel('Count', fontsize=16)
+#     ax.set_title(f'Monthly Probable Out Events, Temperature Peaks, and Humidity Peaks for {subject_name}', fontsize=16)
+#     ax.set_xticks(x)
+#     ax.set_xticklabels(months_years, rotation=45, ha="right", fontsize=16)
+#     ax.tick_params(axis='y', labelsize=16)
+#     ax.legend(loc='best', fontsize=14)
+#     plt.tight_layout()
+#     plt.savefig(f'{subject_name}_{strng}_events_peaks.png')
+#     plt.show()
 
-    # Add vertical lines at the start and end of each day
-    unique_dates = dff['ts'].dt.date.unique()
-    # print(unique_dates)
-    for date in unique_dates:
-        start_of_day = pd.Timestamp(date)
-        end_of_day = pd.Timestamp(date) + pd.Timedelta(days=1)
-        
-        plt.axvline(x=start_of_day, color='gray', linestyle='--', alpha=0.6)
-        plt.axvline(x=end_of_day, color='gray', linestyle='--', alpha=0.6)
-    
-    
-    # Add titles and labels
-    plt.title('Denoised Sensor Values Over Time')
-    plt.xlabel('Timestamp')
-    plt.ylabel('Denoised Sensor Value')
-    
-    # Format x-axis to show each date properly
-    plt.gca().xaxis.set_major_locator(mdates.DayLocator())
-    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
+def plot_event_and_peak_counts(all_out_event_counts, all_temperature_peak_counts, all_humidity_peak_counts, subject_name, strng):
+    months_years = []
+    out_event_counts = []
+    temperature_peak_counts = []
+    humidity_peak_counts = []
 
-    # Rotate x-axis labels by 90 degrees for better space management
-    plt.xticks(rotation=90, ha='center')
+    # Iterate over years and months, combining all counts
+    for year in sorted(set(all_out_event_counts.keys()).union(all_temperature_peak_counts.keys()).union(all_humidity_peak_counts.keys())):
+        for month in sorted(set(all_out_event_counts.get(year, {}).keys())
+                            .union(all_temperature_peak_counts.get(year, {}).keys())
+                            .union(all_humidity_peak_counts.get(year, {}).keys())):
+            month_year_str = f"{month:02d}-{year}"
+            months_years.append(month_year_str)
+            out_event_counts.append(all_out_event_counts.get(year, {}).get(month, 0))
+            temperature_peak_counts.append(all_temperature_peak_counts.get(year, {}).get(month, 0))
+            humidity_peak_counts.append(all_humidity_peak_counts.get(year, {}).get(month, 0))
 
-    # Add grid for better readability
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    x = np.arange(len(months_years))  # the label locations
+    width = 0.3  # the width of the bars (adjusted for three bars)
 
-    # Show legend
-    plt.legend()
+    fig, ax = plt.subplots(figsize=(14, 7))
+    bars1 = ax.bar(x - width, out_event_counts, width, label='Probable Out Events', color='red')
+    bars2 = ax.bar(x, temperature_peak_counts, width, label='Temperature Peaks', color='blue')
+    bars3 = ax.bar(x + width, humidity_peak_counts, width, label='Humidity Peaks', color='green')
 
-    # Display the plot
+    # Annotate bars with counts
+    for bar in bars1:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width() / 2, height, f'{height}', ha='center', va='bottom', fontsize=12)
+
+    for bar in bars2:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width() / 2, height, f'{height}', ha='center', va='bottom', fontsize=12)
+
+    for bar in bars3:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width() / 2, height, f'{height}', ha='center', va='bottom', fontsize=12)
+
+    # Customize the plot
+    ax.set_xlabel('Month-Year', fontsize=16)
+    ax.set_ylabel('Count', fontsize=16)
+    ax.set_title(f'Monthly Probable Out Events, Temperature Peaks, and Humidity Peaks for {subject_name}', fontsize=16)
+    ax.set_xticks(x)
+    ax.set_xticklabels(months_years, rotation=45, ha="right", fontsize=16)
+    ax.tick_params(axis='y', labelsize=16)
+    ax.legend(loc='best', fontsize=14)
     plt.tight_layout()
+    plt.savefig(f'{subject_name}_{strng}_events_peaks.png')
     plt.show()
-   
-
-def detect_peaks(df, column_name, prominence=1):
-    peaks, _ = find_peaks(df[column_name], prominence=prominence)
-    df['peak_detected'] = 0
-    df.loc[peaks, 'peak_detected'] = 1
-    return peaks, df
-
-def compute_probable_out_events(house_entrance_df, month, year):
-    house_entrance_df_specific_month = house_entrance_df[
-        (house_entrance_df['ts_on'].dt.year == year) & (house_entrance_df['ts_on'].dt.month == month)]
-
-    out_event_count = {}
-    out_event_times = {}  
-    
-    for i in range(1, len(house_entrance_df_specific_month)):
-        ws = house_entrance_df_specific_month.iloc[i-1]['ts_off']
-        we = house_entrance_df_specific_month.iloc[i]['ts_on']
-        time_difference = we - ws
-        
-        is_out_event = True
-        for j in range(len(df)):
-            # J = 9 belongs to the magnetic sensor of the door
-            if j == 9:
-                continue
-            
-            temp_sensor = df[j]['sensor'] # sensor name
-            temp_sensor_df = df[j]['filtered_df'] # 
-            
-            if len(temp_sensor_df) > 0:
-                # Check if any sensor was activated during the ws-we interval
-                temp_df = temp_sensor_df[(temp_sensor_df['ts_on'] >= ws) & (temp_sensor_df['ts_on'] <= we)]
-        
-                if not temp_df.empty:
-                    is_out_event = False
-                    break
-        
-        if is_out_event:
-            date_str = ws.date().strftime('%Y-%m-%d')  # Convert the date to a string for counting
-            out_event_info = (ws, we)  # Tuple of start and end times of the out-event
-            
-            if date_str in out_event_count:
-                out_event_count[date_str] += 1
-                out_event_times[date_str].append(out_event_info)
-            else:
-                out_event_count[date_str] = 1
-                out_event_times[date_str] = [out_event_info]
-                
-    return out_event_count, out_event_times
-
-def compute_probable_monthly_out_events(house_entrance_df,df, month, year):
-    # Filter data for the specific month and year
-    house_entrance_df_specific_month = house_entrance_df[
-        (house_entrance_df['ts_on'].dt.year == year) & 
-        (house_entrance_df['ts_on'].dt.month == month)
-    ]
-
-    # Initialize counters
-    out_event_count = 0  # Count for the entire month
-    out_event_times = []  # List to store all out-event times for the month
-
-    # Loop through each possible out-event in the filtered DataFrame
-    for i in range(1, len(house_entrance_df_specific_month)):
-        ws = house_entrance_df_specific_month.iloc[i-1]['ts_off']
-        we = house_entrance_df_specific_month.iloc[i]['ts_on']
-        time_difference = we - ws
-        
-        is_out_event = True
-        
-        # Check for activity from other sensors within the ws-we interval
-        for j in range(len(df)):
-            if j == 9:  # Skip the magnetic sensor of the door
-                continue
-            
-            temp_sensor_df = df[j]['filtered_df']
-            
-            if len(temp_sensor_df) > 0:
-                # Check if any sensor was activated during the ws-we interval
-                temp_df = temp_sensor_df[(temp_sensor_df['ts_on'] >= ws) & (temp_sensor_df['ts_on'] <= we)]
-        
-                if not temp_df.empty:
-                    is_out_event = False
-                    break
-        
-        # If no sensor activity is detected, count it as an out event
-        if is_out_event:
-            out_event_count += 1  # Increment the monthly count
-            out_event_info = (ws, we)  # Tuple of start and end times of the out-event
-            out_event_times.append(out_event_info)  # Store the out-event times
-    
-    return out_event_count, out_event_times
-
-
-
-def create_all_out_event_peaks(df, year, month):
-
-    df['ts'] = pd.to_datetime(df['ts'], errors='coerce')
-
-    if 'date' not in df.columns:
-        df['date'] = df['ts'].dt.date    
-
-    # Filter the DataFrame for the specific year and month
-    df_month = df[(df['ts'].dt.year == year) & (df['ts'].dt.month == month)]
-    peaks_per_day = {}
-    
-    # Count peaks per day
-    for date, group in df_month.groupby('date'):
-        peaks_count = group['peak_detected'].sum()  # Count of peaks on this date
-        date_str = date.strftime('%Y-%m-%d')
-        peaks_per_day[date_str] = peaks_count
-    
-    return peaks_per_day
-
-
-
-def plot_sensor_values_with_peaks(stove_humidity_raw_data, year, month, detect_peaks):
-    # Convert 'ts' from milliseconds to datetime
-    stove_humidity_raw_data['datetime'] = pd.to_datetime(stove_humidity_raw_data['ts'], unit='ms')
-    
-    # Filter DataFrame by year and month
-    filtered_df_raw_stove = stove_humidity_raw_data[
-        (stove_humidity_raw_data['datetime'].dt.year == year) &
-        (stove_humidity_raw_data['datetime'].dt.month == month)
-    ]
-    
-    # Reset index after filtering
-    filtered_df_raw_stove = filtered_df_raw_stove.reset_index(drop=True)
-    
-        
-    # Detect peaks
-    peaks_raw, df_with_peaks_raw = detect_peaks(filtered_df_raw_stove, 'sensor_values', prominence=2)
-    
-    # Plot the data
-    plt.figure(figsize=(12, 6))
-    
-    # Plot sensor values
-    plt.plot(filtered_df_raw_stove['datetime'], filtered_df_raw_stove['sensor_values'], linestyle='-', color='b', label='Sensor Values')
-    
-    # Plot peaks
-    plt.plot(filtered_df_raw_stove['datetime'].iloc[peaks_raw], filtered_df_raw_stove['sensor_values'].iloc[peaks_raw], 'ro', label='Detected Peaks')
-    
-    unique_dates = filtered_df_raw_stove['datetime'].dt.date.unique()
-    print(unique_dates)
-    for date in unique_dates:
-        start_of_day = pd.Timestamp(date)
-        end_of_day = pd.Timestamp(date) + pd.Timedelta(days=1)
-        
-        plt.axvline(x=start_of_day, color='gray', linestyle='--', alpha=0.6)
-        plt.axvline(x=end_of_day, color='gray', linestyle='--', alpha=0.6)
-        
-        
-    # Formatting the plot
-    plt.title(f'Sensor Values with Detected Peaks for {year}-{month:02d}')
-    plt.xlabel('Time (Date and Time)')
-    plt.ylabel('Sensor Values')
-    plt.xticks(rotation=45, ha='right')
-    plt.grid(True)
-    
-    # Show the legend
-    plt.legend()
-    
-    # Show the plot
-    plt.tight_layout()
-    plt.show()
-    
-    
-def plot_sensor_values_with_peaks22(dff,year, month, detect_peaks): 
-    import matplotlib.dates as mdates
-    dff['datetime'] = pd.to_datetime(dff['ts'], unit='ms')
-    dff = dff[
-        (dff['datetime'].dt.year == year) &
-        (dff['datetime'].dt.month == month)
-    ]
-    peaks_raw, df_with_peaks_raw = detect_peaks(dff, 'sensor_values', prominence=2)
-    plt.figure(figsize=(14, 7))
-
-    # Plot the denoised sensor values
-    plt.plot(dff['datetime'], dff['sensor_values'], label='sensor_values Sensor Value', color='blue')
-    
-    if peaks_raw is not None:
-        plt.scatter(dff.iloc[peaks_raw]['datetime'], dff.iloc[peaks_raw]['sensor_values'], color='red', label='Peaks', zorder=5)
-
-
-    # Add vertical lines at the start and end of each day
-    unique_dates = dff['datetime'].dt.date.unique()
-    print(unique_dates)
-    for date in unique_dates:
-        # Convert date to timestamp for plotting
-        start_of_day = pd.Timestamp(date)
-        end_of_day = start_of_day + pd.Timedelta(days=1)
-        
-        # Plot vertical lines for the start and end of the day
-        plt.axvline(x=start_of_day, color='gray', linestyle='--', alpha=0.6)
-        plt.axvline(x=end_of_day, color='gray', linestyle='--', alpha=0.6)
-        
-    
-    # Add titles and labels
-    plt.title('Denoised Sensor Values Over Time')
-    plt.xlabel('Timestamp')
-    plt.ylabel('Denoised Sensor Value')
-    
-    # Format x-axis to show each date properly
-    plt.gca().xaxis.set_major_locator(mdates.DayLocator())
-    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
-
-    # Rotate x-axis labels by 90 degrees for better space management
-    plt.xticks(rotation=90, ha='center')
-
-    # Add grid for better readability
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
-
-    # Show legend
-    plt.legend()
-
-    # Display the plot
-    plt.tight_layout()
-    plt.show()
-    
