@@ -11,6 +11,8 @@ from datetime import datetime
 from scipy.signal import find_peaks
 from sklearn.manifold import TSNE
 print('...')
+# subject_index_mapping = {0: 'Subject-1', 1:'Subject-2',2:'Subject-3',3:'Subject-4',4:'Subject-5',5:'Subject-5',6:'Subject-7',7:'Subject-8'}
+subject_index_mapping = {0: 'Subject-1', 1:'Subject-2',2:'Subject-3',3:'Subject-7',4:'Subject-8',5:'Subject-9',6:'Subject-11',7:'Subject-12'}
 
 sensor_files = [
     "CoffeMachine.csv",
@@ -26,8 +28,10 @@ sensor_files = [
     "HouseEntrance.csv",
     "Hum_Temp_Bath_humidity.csv",
     "Hum_Temp_Bath_temp.csv",
-    "Hum_Temp_Stove_humidity.csv",
-    "Hum_Temp_Stove_temp.csv",
+    "Stove_Hum_Temp_humidity.csv",
+    "Stove_Hum_Temp_temp.csv",
+    # "Hum_Temp_Stove_humidity.csv",
+    # "Hum_Temp_Stove_temp.csv",
     "Medicines.csv",
     "Microwave.csv",
     "Microwave_events.csv",
@@ -54,10 +58,10 @@ sensor_files = [
     "printer_events.csv",
     "washingMachine_events.csv"
 ]
-
+#data_path, subjects, unwanted_values, skip_substrings= data_path, subjects, unwanted_values, skip_substring
 def load_subjectwise_data(data_path, subjects, unwanted_values, skip_substrings):
     subject_data = []
-    for sub in range(len(subjects)):
+    for sub in range(10):
         subject_sub = subjects[sub]
         subject_data_path = os.path.join(data_path, subject_sub, 'environmentals')
         print(subject_data_path)
@@ -94,12 +98,13 @@ def load_subjectwise_data(data_path, subjects, unwanted_values, skip_substrings)
                     ## Make sure sensor readings are real values
                     sdf['sensor_status'] = pd.to_numeric(sdf['sensor_status'], errors='coerce')
                     ## Detect the peak
-                    peaks, sdf = detect_peaks(sdf, 'sensor_status', prominence_value = 1)
+                    peaks, sdf = detect_peaks(sdf, 'sensor_status', prominence = 1)
                     sdf = sdf.rename(columns={'sensor_status': 'sensor_values', 'peak_detected': 'sensor_status'})
                     sdf = sdf.reset_index(drop=True)
-                    filtered_df = filter_consecutive_on_and_off_in_real_valued_sensor(sdf) ## Only for real-valued sensors
-                    filtered_df = filtered_df.reset_index(drop=True)
-                    filtered_df = post_process_sensor_data(filtered_df)
+                    filtered_df = []
+                    # filtered_df = filter_consecutive_on_and_off_in_real_valued_sensor(sdf) ## Only for real-valued sensors
+                    # filtered_df = filtered_df.reset_index(drop=True)
+                    # filtered_df = post_process_sensor_data(filtered_df)
                     cleaned_data.append({'sensor':sensor_file, 'filtered_df':filtered_df, 'sensor_df':sdf})
                 else:
                     filtered_df = post_process_sensor_data(sdf)
@@ -449,3 +454,386 @@ def plot_duration_distribution2(on_off_diff, bin_duration=30, next_on_time=None,
     fig.update_layout(xaxis_tickangle=-45, annotations=annotations)
     
     fig.show()
+    
+#%%
+def timedelta_to_seconds(td):
+    return td.total_seconds()
+
+def create_combined_df(out_event_counts, peak_counts, all_dates):
+    combined_data = {'Date': all_dates}
+    combined_data['Out Events'] = get_values_for_dates({date: count for month_data in out_event_counts.values() for date, count in month_data.items()}, all_dates)
+    combined_data['Peaks'] = get_values_for_dates({date: count for month_data in peak_counts.values() for date, count in month_data.items()}, all_dates)
+    return pd.DataFrame(combined_data)
+
+# Function to get values for dates
+def get_values_for_dates(data_dict, all_dates):
+    return [data_dict.get(date, 0) for date in all_dates]
+
+# Plot the data
+def plot_out_event_and_peak_counts(combined_df, month, sn, kk):
+    if kk == 13:
+        temp_str = 'Temperature Peaks'
+    elif kk ==12:
+        temp_str = 'Humidity Peaks'
+        
+    plt.figure(figsize=(14, 7))
+
+    x = np.arange(len(combined_df['Date']))  # X locations for the groups
+    bar_width = 0.4  # Width of the bars
+
+    # Plot bars
+    plt.bar(x - bar_width / 2, combined_df['Out Events'], bar_width, label='Probable Out Events', alpha=0.7)
+    plt.bar(x + bar_width / 2, combined_df['Peaks'], bar_width, label=temp_str, alpha=0.7)
+
+    # Format x-axis
+    plt.xticks(x, combined_df['Date'], rotation=90)
+    plt.gca().xaxis.set_major_locator(plt.MaxNLocator(nbins=10))
+    
+    # Add titles and labels
+    plt.title(f'Probable Out-Events and Peak Counts for {month} and for '+str(subject_index_mapping[sn]))
+    plt.xlabel('Date')
+    plt.ylabel('Count')
+
+    # Add grid for better readability
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+
+    # Show legend
+    plt.legend()
+
+    # Display the plot
+    plt.tight_layout()
+    plt.savefig('out_events_and_peak_count'+str(month)+'_'+str(subject_index_mapping[sn])+'.png')
+
+    plt.show()
+
+
+def background_subtraction_denoise(df, background_method='median', window_size=5):
+    df = df.copy()
+
+    # Ensure that sensor_value is numeric
+    df['sensor_values'] = pd.to_numeric(df['sensor_values'], errors='coerce')
+
+    # Sort the DataFrame by timestamp for consistent rolling
+    df = df.sort_values(by='ts')
+    df['ts'] = pd.to_datetime(df['ts'], unit = 'ms',errors='coerce')
+
+
+    # Calculate the background based on the chosen method
+    if background_method == 'mean':
+        df['background'] = df['sensor_values'].rolling(window=window_size, center=True, min_periods=1).mean()
+    elif background_method == 'median':
+        df['background'] = df['sensor_values'].rolling(window=window_size, center=True, min_periods=1).median()
+    else:
+        raise ValueError("background_method must be either 'mean' or 'median'")
+
+    # Subtract the background from the original sensor value to get the denoised signal
+    df['denoised_sensor_value'] = df['sensor_values'] - df['background']
+    df['denoised_sensor_value'] = df['denoised_sensor_value'].apply(lambda x: max(x, 0))
+    return df
+
+#dff, peaks = df_with_peaks, peaks
+def plot_raw_sensor_values(dff,peaks=None): 
+    import matplotlib.dates as mdates
+    plt.figure(figsize=(14, 7))
+    dff['ts'] = pd.to_datetime(dff['ts'], unit='ms')
+    plt.plot(dff['ts'], dff['sensor_values'], label='Sensor Values', color='blue')
+    
+    
+    if peaks is not None:
+        plt.scatter(dff.iloc[peaks]['ts'], dff.iloc[peaks]['sensor_values'], color='red', label='Peaks', zorder=5)
+
+    unique_dates = dff['datetime'].dt.date.unique()
+    # print(unique_dates)
+    for date in unique_dates:
+        start_of_day = pd.Timestamp(date)
+        end_of_day = pd.Timestamp(date) + pd.Timedelta(days=1)
+        
+        plt.axvline(x=start_of_day, color='gray', linestyle='--', alpha=0.6)
+        plt.axvline(x=end_of_day, color='gray', linestyle='--', alpha=0.6)
+    
+    
+    # Add titles and labels
+    plt.title('Sensor Values Over Time')
+    plt.xlabel('Timestamp')
+    plt.ylabel('Sensor Value')
+    
+    # Format x-axis to show each date properly
+    plt.gca().xaxis.set_major_locator(mdates.DayLocator())
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
+
+    # Rotate x-axis labels by 90 degrees for better space management
+    plt.xticks(rotation=90, ha='center')
+
+    # Add grid for better readability
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+
+    # Show legend
+    plt.legend()
+
+    # Display the plot
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_denoised_sensor_values(dff,peaks=None): 
+    import matplotlib.dates as mdates
+
+    plt.figure(figsize=(14, 7))
+
+    # Plot the denoised sensor values
+    plt.plot(dff['ts'], dff['denoised_sensor_value'], label='Denoised Sensor Value', color='blue')
+    
+    if peaks is not None:
+        plt.scatter(dff.iloc[peaks]['ts'], dff.iloc[peaks]['denoised_sensor_value'], color='red', label='Peaks', zorder=5)
+
+
+    # Add vertical lines at the start and end of each day
+    unique_dates = dff['ts'].dt.date.unique()
+    # print(unique_dates)
+    for date in unique_dates:
+        start_of_day = pd.Timestamp(date)
+        end_of_day = pd.Timestamp(date) + pd.Timedelta(days=1)
+        
+        plt.axvline(x=start_of_day, color='gray', linestyle='--', alpha=0.6)
+        plt.axvline(x=end_of_day, color='gray', linestyle='--', alpha=0.6)
+    
+    
+    # Add titles and labels
+    plt.title('Denoised Sensor Values Over Time')
+    plt.xlabel('Timestamp')
+    plt.ylabel('Denoised Sensor Value')
+    
+    # Format x-axis to show each date properly
+    plt.gca().xaxis.set_major_locator(mdates.DayLocator())
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
+
+    # Rotate x-axis labels by 90 degrees for better space management
+    plt.xticks(rotation=90, ha='center')
+
+    # Add grid for better readability
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+
+    # Show legend
+    plt.legend()
+
+    # Display the plot
+    plt.tight_layout()
+    plt.show()
+   
+
+def detect_peaks(df, column_name, prominence=1):
+    peaks, _ = find_peaks(df[column_name], prominence=prominence)
+    df['peak_detected'] = 0
+    df.loc[peaks, 'peak_detected'] = 1
+    return peaks, df
+
+def compute_probable_out_events(house_entrance_df, month, year):
+    house_entrance_df_specific_month = house_entrance_df[
+        (house_entrance_df['ts_on'].dt.year == year) & (house_entrance_df['ts_on'].dt.month == month)]
+
+    out_event_count = {}
+    out_event_times = {}  
+    
+    for i in range(1, len(house_entrance_df_specific_month)):
+        ws = house_entrance_df_specific_month.iloc[i-1]['ts_off']
+        we = house_entrance_df_specific_month.iloc[i]['ts_on']
+        time_difference = we - ws
+        
+        is_out_event = True
+        for j in range(len(df)):
+            # J = 9 belongs to the magnetic sensor of the door
+            if j == 9:
+                continue
+            
+            temp_sensor = df[j]['sensor'] # sensor name
+            temp_sensor_df = df[j]['filtered_df'] # 
+            
+            if len(temp_sensor_df) > 0:
+                # Check if any sensor was activated during the ws-we interval
+                temp_df = temp_sensor_df[(temp_sensor_df['ts_on'] >= ws) & (temp_sensor_df['ts_on'] <= we)]
+        
+                if not temp_df.empty:
+                    is_out_event = False
+                    break
+        
+        if is_out_event:
+            date_str = ws.date().strftime('%Y-%m-%d')  # Convert the date to a string for counting
+            out_event_info = (ws, we)  # Tuple of start and end times of the out-event
+            
+            if date_str in out_event_count:
+                out_event_count[date_str] += 1
+                out_event_times[date_str].append(out_event_info)
+            else:
+                out_event_count[date_str] = 1
+                out_event_times[date_str] = [out_event_info]
+                
+    return out_event_count, out_event_times
+
+def compute_probable_monthly_out_events(house_entrance_df,df, month, year):
+    # Filter data for the specific month and year
+    house_entrance_df_specific_month = house_entrance_df[
+        (house_entrance_df['ts_on'].dt.year == year) & 
+        (house_entrance_df['ts_on'].dt.month == month)
+    ]
+
+    # Initialize counters
+    out_event_count = 0  # Count for the entire month
+    out_event_times = []  # List to store all out-event times for the month
+
+    # Loop through each possible out-event in the filtered DataFrame
+    for i in range(1, len(house_entrance_df_specific_month)):
+        ws = house_entrance_df_specific_month.iloc[i-1]['ts_off']
+        we = house_entrance_df_specific_month.iloc[i]['ts_on']
+        time_difference = we - ws
+        
+        is_out_event = True
+        
+        # Check for activity from other sensors within the ws-we interval
+        for j in range(len(df)):
+            if j == 9:  # Skip the magnetic sensor of the door
+                continue
+            
+            temp_sensor_df = df[j]['filtered_df']
+            
+            if len(temp_sensor_df) > 0:
+                # Check if any sensor was activated during the ws-we interval
+                temp_df = temp_sensor_df[(temp_sensor_df['ts_on'] >= ws) & (temp_sensor_df['ts_on'] <= we)]
+        
+                if not temp_df.empty:
+                    is_out_event = False
+                    break
+        
+        # If no sensor activity is detected, count it as an out event
+        if is_out_event:
+            out_event_count += 1  # Increment the monthly count
+            out_event_info = (ws, we)  # Tuple of start and end times of the out-event
+            out_event_times.append(out_event_info)  # Store the out-event times
+    
+    return out_event_count, out_event_times
+
+
+
+def create_all_out_event_peaks(df, year, month):
+
+    df['ts'] = pd.to_datetime(df['ts'], errors='coerce')
+
+    if 'date' not in df.columns:
+        df['date'] = df['ts'].dt.date    
+
+    # Filter the DataFrame for the specific year and month
+    df_month = df[(df['ts'].dt.year == year) & (df['ts'].dt.month == month)]
+    peaks_per_day = {}
+    
+    # Count peaks per day
+    for date, group in df_month.groupby('date'):
+        peaks_count = group['peak_detected'].sum()  # Count of peaks on this date
+        date_str = date.strftime('%Y-%m-%d')
+        peaks_per_day[date_str] = peaks_count
+    
+    return peaks_per_day
+
+
+
+def plot_sensor_values_with_peaks(stove_humidity_raw_data, year, month, detect_peaks):
+    # Convert 'ts' from milliseconds to datetime
+    stove_humidity_raw_data['datetime'] = pd.to_datetime(stove_humidity_raw_data['ts'], unit='ms')
+    
+    # Filter DataFrame by year and month
+    filtered_df_raw_stove = stove_humidity_raw_data[
+        (stove_humidity_raw_data['datetime'].dt.year == year) &
+        (stove_humidity_raw_data['datetime'].dt.month == month)
+    ]
+    
+    # Reset index after filtering
+    filtered_df_raw_stove = filtered_df_raw_stove.reset_index(drop=True)
+    
+        
+    # Detect peaks
+    peaks_raw, df_with_peaks_raw = detect_peaks(filtered_df_raw_stove, 'sensor_values', prominence=2)
+    
+    # Plot the data
+    plt.figure(figsize=(12, 6))
+    
+    # Plot sensor values
+    plt.plot(filtered_df_raw_stove['datetime'], filtered_df_raw_stove['sensor_values'], linestyle='-', color='b', label='Sensor Values')
+    
+    # Plot peaks
+    plt.plot(filtered_df_raw_stove['datetime'].iloc[peaks_raw], filtered_df_raw_stove['sensor_values'].iloc[peaks_raw], 'ro', label='Detected Peaks')
+    
+    unique_dates = filtered_df_raw_stove['datetime'].dt.date.unique()
+    print(unique_dates)
+    for date in unique_dates:
+        start_of_day = pd.Timestamp(date)
+        end_of_day = pd.Timestamp(date) + pd.Timedelta(days=1)
+        
+        plt.axvline(x=start_of_day, color='gray', linestyle='--', alpha=0.6)
+        plt.axvline(x=end_of_day, color='gray', linestyle='--', alpha=0.6)
+        
+        
+    # Formatting the plot
+    plt.title(f'Sensor Values with Detected Peaks for {year}-{month:02d}')
+    plt.xlabel('Time (Date and Time)')
+    plt.ylabel('Sensor Values')
+    plt.xticks(rotation=45, ha='right')
+    plt.grid(True)
+    
+    # Show the legend
+    plt.legend()
+    
+    # Show the plot
+    plt.tight_layout()
+    plt.show()
+    
+    
+def plot_sensor_values_with_peaks22(dff,year, month, detect_peaks): 
+    import matplotlib.dates as mdates
+    dff['datetime'] = pd.to_datetime(dff['ts'], unit='ms')
+    dff = dff[
+        (dff['datetime'].dt.year == year) &
+        (dff['datetime'].dt.month == month)
+    ]
+    peaks_raw, df_with_peaks_raw = detect_peaks(dff, 'sensor_values', prominence=2)
+    plt.figure(figsize=(14, 7))
+
+    # Plot the denoised sensor values
+    plt.plot(dff['datetime'], dff['sensor_values'], label='sensor_values Sensor Value', color='blue')
+    
+    if peaks_raw is not None:
+        plt.scatter(dff.iloc[peaks_raw]['datetime'], dff.iloc[peaks_raw]['sensor_values'], color='red', label='Peaks', zorder=5)
+
+
+    # Add vertical lines at the start and end of each day
+    unique_dates = dff['datetime'].dt.date.unique()
+    print(unique_dates)
+    for date in unique_dates:
+        # Convert date to timestamp for plotting
+        start_of_day = pd.Timestamp(date)
+        end_of_day = start_of_day + pd.Timedelta(days=1)
+        
+        # Plot vertical lines for the start and end of the day
+        plt.axvline(x=start_of_day, color='gray', linestyle='--', alpha=0.6)
+        plt.axvline(x=end_of_day, color='gray', linestyle='--', alpha=0.6)
+        
+    
+    # Add titles and labels
+    plt.title('Denoised Sensor Values Over Time')
+    plt.xlabel('Timestamp')
+    plt.ylabel('Denoised Sensor Value')
+    
+    # Format x-axis to show each date properly
+    plt.gca().xaxis.set_major_locator(mdates.DayLocator())
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
+
+    # Rotate x-axis labels by 90 degrees for better space management
+    plt.xticks(rotation=90, ha='center')
+
+    # Add grid for better readability
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+
+    # Show legend
+    plt.legend()
+
+    # Display the plot
+    plt.tight_layout()
+    plt.show()
+    

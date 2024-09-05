@@ -9,7 +9,11 @@ Created on Wed Aug 28 09:14:38 2024
 import numpy as np, pandas as pd, os, pickle
 from natsort import natsorted
 from scipy.signal import find_peaks
+from datetime import timedelta
 import matplotlib.pyplot as plt
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 #%%
 # data_path = '/home/hubble/Downloads/pilot_data_download/code/DATA'
 data_path = '/home/hubble/work/serenade/data'
@@ -238,7 +242,7 @@ def read_csv_files(data_path):
                 df['ts'] = df['ts'] + milliseconds_in_2_hours
                 if len(df) > 0:
                     df = df[~df['sensor_status'].isin(['unavailable', 'unknown'])]    
-                    df = df.reset_index(inplace=True)
+                    df.reset_index(drop=True, inplace=True)
                     df, isEnvironmentalSensor = remove_continuous_on_off(df)
                     df['ts_datetime'] = pd.to_datetime(df['ts'], unit='ms')
                     
@@ -351,7 +355,6 @@ def count_virtual_out_events(house_entrance, data_subject_1, year=None, month=No
         duration = (we - ws).total_seconds() / 60
         
         is_out_event = True
-        temp = []
         for j in range(len(environmental_sensors)):
             sensor_name = environmental_sensors[j]
             
@@ -366,34 +369,25 @@ def count_virtual_out_events(house_entrance, data_subject_1, year=None, month=No
                 if 'Motion' not in sensor_name:
                     temp_df = sensor_df_processed[(sensor_df_processed['ts_on'] <= we) & (sensor_df_processed['ts_off'] >= ws)]
                     if not temp_df.empty:
-                        print(j, sensor_name)
+                        # print(j, sensor_name)
                         for r in range(len(temp_df)):
                             ts_on, ts_off = temp_df.iloc[r]['ts_on'], temp_df.iloc[r]['ts_off']
                             case_value = determine_sensor_case(ws, we, ts_on, ts_off)
-                            # if case_value == 2:
-                            #     is_out_event = True
                             if case_value in [1,3,4]:
-                                # print(j, sensor_name)
+                                print(j, sensor_name)
                                 is_out_event = False
                                 break
                             
                 else:#if 'Motion' in sensor_name:
                     temp_df = sensor_df_processed[(sensor_df_processed['ts_on'] <= we) & (sensor_df_processed['ts_off'] >= ws)]
                     if not temp_df.empty:
-                        print(j, sensor_name, temp_df)
-                        temp.append(temp_df)
                         for r in range(len(temp_df)):
                             ts_on, ts_off = temp_df.iloc[r]['ts_on'], temp_df.iloc[r]['ts_off']
                             case_value = determine_sensor_case(ws, we, ts_on, ts_off)
                             if case_value in [1,3]:
+                                print(j, sensor_name)
                                 is_out_event = False
                                 break
-                            # if ts_on < ws and ws <= ts_off <= we:
-                            #     is_out_event = True
-                            #     # print(j,sensor_name)
-                            # else:
-                            #     is_out_event = False
-                            #     break
                                 
         if is_out_event:            
             out_event_count += 1
@@ -463,25 +457,24 @@ def detect_peaks(df, value_col='sensor_status', prominence=1.5):
 
 def count_peaks(data_subject_1, sensor_file, year = None, month = None, prominence = 1.5, st=None, et = None):
     if sensor_file in data_subject_1:
-        temperatue_data = data_subject_1[sensor_file][0]    
-        temperatue_data = temperatue_data.reset_index(inplace = True)
+        temperatue_data = data_subject_1[sensor_file][0].copy()  
+        # 
         if year != None and month != None:
-            temperatue_data = temperatue_data[(temperatue_data['ts_datetime'].dt.year == year) & (temperatue_data['ts_datetime'].dt.month == month)]
-            temperatue_data = temperatue_data.reset_index(inplace = True)
+            temperatue_data_ym = temperatue_data[(temperatue_data['ts_datetime'].dt.year == year) & (temperatue_data['ts_datetime'].dt.month == month)].copy()
+            tData = temperatue_data_ym.copy()
             if st != None and et !=None:
                 # print('xxxxxxxxxxxx')
-                temperatue_data = temperatue_data[
-                    (temperatue_data['ts_datetime'].dt.time >= st) &
-                    (temperatue_data['ts_datetime'].dt.time <= et)] 
+                temperatue_data_stet = temperatue_data_ym[
+                    (temperatue_data_ym['ts_datetime'].dt.time >= st) &
+                    (temperatue_data_ym['ts_datetime'].dt.time <= et)] 
+                tData = temperatue_data_stet.copy()
                 
-                temperatue_data = temperatue_data.reset_index(inplace = True)
             # print(temperatue_data)
-            
-        peaks, df_temperature_data= detect_peaks(temperatue_data, 'sensor_status', prominence=prominence)  
+        peaks, df_temperature_data= detect_peaks(tData, 'sensor_status', prominence=prominence)  
         selected_df = temperatue_data.loc[peaks, ['ts_datetime', 'sensor_status']]
         
         # Output the result
-        print(selected_df)
+        # print(selected_df)
         peak_count = len(peaks)
     else:
         peak_count = 0
@@ -656,8 +649,8 @@ years_months = {
     2024: [1,2,3,4,5,6,7,8]
 }
 
-# st = pd.to_datetime('11:00:00').time()
-# et = pd.to_datetime('14:59:00').time()
+st = pd.to_datetime('18:00:00').time()
+et = pd.to_datetime('23:59:00').time()
 
 st = None
 et = None
@@ -693,8 +686,8 @@ for sn in range(len(subjects)):
         
         for month in months:
             if len(house_entrance) > 0:
-                from datetime import timedelta
-                out_counts, out_timings,xx = count_virtual_out_events(house_entrance, data_subject_1, year = year, month = month, st=st, et=et)
+                
+                out_counts, out_timings, __ = count_virtual_out_events(house_entrance, data_subject_1, year = year, month = month, st=st, et=et)
                 all_out_event_counts[year][month] = out_counts
                 all_out_event_timings[year][month] = out_timings
                 
@@ -710,7 +703,7 @@ for sn in range(len(subjects)):
             # if len(df_with_humidity_peaks) > 0 and len(df_with_temperature_peaks) > 0:
             #     plot_signal_with_peaks(df_with_humidity_peaks, peaks_humidity, df_with_temperature_peaks, peaks_temperature, 'temperature peaks', 'humidity peaks', subject_name, year, month)
             
-    # plot_event_and_peak_counts(all_out_event_counts, all_temperature_peak_counts, all_humidity_peak_counts, subject_name, strng = 'whole_day')
+    plot_event_and_peak_counts(all_out_event_counts, all_temperature_peak_counts, all_humidity_peak_counts, subject_name, strng = 'whole_day')
     subjectwise_count[subject_name] = [all_temperature_peak_counts,all_humidity_peak_counts,all_out_event_counts]
 
 
@@ -904,4 +897,105 @@ for year in years:
         "LONG": long_count
     }
                     
-          
+    
+
+
+
+
+data_subject_2 = data['subject_2']
+environmental_sensors = list(data_subject_2.keys())
+concatenated_df = pd.DataFrame()
+
+
+def plot_sensor_active_periods(data_subject_2, environmental_sensors, st, et):
+    # Define your start and end dates using pd.to_datetime()
+    start_date = st#pd.to_datetime('2023-07-21 00:00:00')
+    end_date = et#pd.to_datetime('2023-07-26 00:00:00')
+    concatenated_df_1 = pd.DataFrame()
+    df_combined_non_temp_humidity = []
+    df_combined_temp_humidity = {}
+    for sens in range(len(environmental_sensors)):
+        sensor_name = environmental_sensors[sens]
+        if sensor_name in ['Shower_Hum_Temp_humidity.csv','Shower_Hum_Temp_temp.csv','Stove_Hum_Temp_humidity.csv','Stove_Hum_Temp_temp.csv']:
+            df_sensor = data_subject_2[sensor_name][0]
+            df_sensor['ts_datetime'] = pd.to_datetime(df_sensor['ts_datetime'])
+            filtered_df = df_sensor[(df_sensor['ts_datetime'] >= start_date) & (df_sensor['ts_datetime'] <= end_date)]
+            sub_df_sensor = filtered_df[['sensor_id', 'ts_datetime', 'sensor_status']]
+            df_combined_temp_humidity[sensor_name] = sub_df_sensor
+            sub_df_sensor = pd.DataFrame()
+        else:
+            df_sensor = data_subject_2[sensor_name][1]
+            df_sensor['ts_on'] = pd.to_datetime(df_sensor['ts_on'])
+            df_sensor['ts_off'] = pd.to_datetime(df_sensor['ts_off'])
+            filtered_df = df_sensor[(df_sensor['ts_on'] >= start_date) & (df_sensor['ts_off'] <= end_date)]
+            sub_df_sensor = filtered_df[['sensor_id', 'ts_on', 'ts_off']]
+            df_combined_non_temp_humidity.append(sub_df_sensor)
+            sub_df_sensor = pd.DataFrame()
+    df_combined_non_temp_humidity = pd.concat(df_combined_non_temp_humidity, ignore_index=True)
+    # df_combined_temp_humidity = pd.concat(df_combined_temp_humidity, ignore_index=True)
+       
+
+    # Create a timeline plot
+    fig = px.timeline(df_combined_non_temp_humidity, x_start='ts_on', x_end='ts_off', y='sensor_id', color='sensor_id',
+                      labels={'sensor_id': 'Sensor ID'})
+    
+    # Customize the layout
+    fig.update_layout(
+        title="Sensor Active Periods Over Time",
+        xaxis_title="Time",
+        yaxis_title="Sensor ID",
+    )
+    
+    temp_humdity_sensor_names = list(df_combined_temp_humidity.keys())
+    for sensor in temp_humdity_sensor_names:
+        sensor_df = df_combined_temp_humidity[sensor]
+        
+        fig.add_trace(
+            go.Scatter(
+                x=sensor_df['ts_datetime'],  # Timestamp for x-axis
+                y=[sensor] * len(sensor_df),  # Repeat the sensor name for y-axis to align with the existing timeline
+                mode='markers+lines',
+                name=f'{sensor}'[:-4],
+                marker=dict(size=8),  # You can customize the size of the marker
+                text=sensor_df['sensor_status'],  # Use sensor_status for hover text
+                hoverinfo='text',  # Show only the text in hover
+                line=dict(dash='dash')  # Dashed line for distinction
+            )
+        )
+
+    # Show the combined plot
+    fig.show()
+
+
+
+st = pd.to_datetime('2023-07-21 00:00:00')
+et = pd.to_datetime('2023-07-26 00:00:00')
+
+plot_sensor_active_periods(data_subject_2, environmental_sensors, st, et)
+
+ 
+# Example data for two sensors with start and end times
+data2 = {
+    'sensor_name': ['Sensor 1'] * 10 + ['Sensor 2'] * 10,  # Sensor names
+    't1': pd.date_range(start='2023-09-01 00:00:00', periods=10, freq='H').tolist() +
+          pd.date_range(start='2023-09-02 00:00:00', periods=10, freq='H').tolist(),  # Start times
+    't2': pd.date_range(start='2023-09-01 01:00:00', periods=10, freq='H').tolist() +
+          pd.date_range(start='2023-09-02 01:00:00', periods=10, freq='H').tolist(),  # End times
+}
+
+# Create a DataFrame
+df = pd.DataFrame(data2)
+
+# Create a timeline plot
+fig = px.timeline(df, x_start='t1', x_end='t2', y='sensor_name', color='sensor_name',
+                  labels={'sensor_name': 'Sensor Name'})
+
+# Customize the layout
+fig.update_layout(
+    title="Sensor Active Periods Over Time",
+    xaxis_title="Time",
+    yaxis_title="Sensor Name",
+)
+
+# Show the plot
+fig.show()

@@ -348,6 +348,7 @@ print(f'Upper Threshold: {upper_threshold}')
 print(f'Anomalous Ratio in Training Data: {anomalous_threshold_ratio}')
 
 
+
 all_test_data = []
 
 # Loop through each test week starting from the second week
