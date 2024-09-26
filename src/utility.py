@@ -273,21 +273,98 @@ def process_sensor_data(df):
     df_conc = df_conc[['sensor_id', 'subject_id', 'sensor_status', 'ts_on_ms', 'ts_off_ms', 'ts_on', 'ts_off', 'duration_ms', 'duration_datetime']]
 
     return df_conc
+
+# def clean_consecutive_labels(self, df, K1 = 'ON', K2 = 'OFF'):
+#     df_cleaned = df.copy()
+#     rows_to_drop = []
+
+#     # Iterate over the DataFrame in reverse order
+#     for i in reversed(list(df_cleaned.index)[1:]):
+#         current_label = df_cleaned.loc[i, 'output']      # Current label
+#         previous_label = df_cleaned.loc[i-1, 'output']   # Previous label
+
+#         # If the current and previous labels are both 'CLOSE', mark the current row to be dropped
+#         if current_label == previous_label and current_label == K2:
+#             rows_to_drop.append(i)
+            
+#         # If the current and previous labels are both 'OPEN', mark the previous row to be dropped
+#         elif current_label == previous_label and current_label == K1:
+#             rows_to_drop.append(i-1)
+
+#     # Drop all rows that were marked
+#     df_cleaned.drop(rows_to_drop, inplace=True)
+
+#     # Reset the index after dropping rows
+#     df_cleaned.reset_index(drop=True, inplace=True)
+    
+#     if df_cleaned.iloc[0]['output'] == K2:
+#         df_cleaned = df_cleaned.iloc[1:].reset_index(drop=True)
+
+#     # Check if the last row's 'output' is 'ON' and remove it
+#     if df_cleaned.iloc[-1]['output'] == K1:
+#         df_cleaned = df_cleaned.iloc[:-1].reset_index(drop=True)
+
+#     df_cleaned['label'] = df_cleaned['label'].fillna('transition')
+
+#     return df_cleaned, rows_to_drop
+
 def remove_continuous_on_off(df_cleaned_1):
     df_cleaned = df_cleaned_1.copy()
+    rows_to_drop = []
     
     contains_on = df_cleaned['sensor_status'].isin(['on']).any()
-    contains_off = df_cleaned['sensor_status'].isin(['off']).any()
-    
+    contains_off = df_cleaned['sensor_status'].isin(['off']).any()   
+    isEnvironmentalSensor = -999
     if contains_on and contains_off:
         isEnvironmentalSensor = True
+    
         for i in reversed(list(df_cleaned.index)[1:]):
-            if df_cleaned.loc[i].sensor_status == df_cleaned.iloc[df_cleaned.index.get_loc(i)-1].sensor_status:
-                df_cleaned.drop([i], inplace=True)
-                # print(i)
+            current_label = df_cleaned.loc[i, 'sensor_status']      # Current label
+            previous_label = df_cleaned.loc[i-1, 'sensor_status']   # Previous label
+    
+            # If the current and previous labels are both 'CLOSE', mark the current row to be dropped
+            if current_label == previous_label and current_label == 'off':
+                rows_to_drop.append(i)
+                
+            # If the current and previous labels are both 'OPEN', mark the previous row to be dropped
+            elif current_label == previous_label and current_label == 'on':
+                rows_to_drop.append(i-1)
+                
+        # Drop all rows that were marked
+        df_cleaned.drop(rows_to_drop, inplace=True)
+    
+        # Reset the index after dropping rows
+        df_cleaned.reset_index(drop=True, inplace=True)
+        
+        if df_cleaned.iloc[0]['sensor_status'] == 'off':
+            df_cleaned = df_cleaned.iloc[1:].reset_index(drop=True)
+    
+        # Check if the last row's 'output' is 'ON' and remove it
+        if df_cleaned.iloc[-1]['sensor_status'] == 'on':
+            df_cleaned = df_cleaned.iloc[:-1].reset_index(drop=True)
+    
+        # df_cleaned['label'] = df_cleaned['label'].fillna('transition')
     else:
         isEnvironmentalSensor = False
-    return df_cleaned, isEnvironmentalSensor
+
+    return df_cleaned, isEnvironmentalSensor    
+
+
+# def remove_continuous_on_off(df_cleaned_1):
+#     df_cleaned = df_cleaned_1.copy()
+    
+#     contains_on = df_cleaned['sensor_status'].isin(['on']).any()
+#     contains_off = df_cleaned['sensor_status'].isin(['off']).any()
+#     isEnvironmentalSensor = -999
+#     if contains_on and contains_off:
+#         isEnvironmentalSensor = True
+#         for i in reversed(list(df_cleaned.index)[1:]):
+#             if df_cleaned.loc[i].sensor_status == df_cleaned.iloc[df_cleaned.index.get_loc(i)-1].sensor_status:
+#                 df_cleaned.drop([i], inplace=True)
+#                 # print(i)
+#     else:
+#         isEnvironmentalSensor = False
+#     return df_cleaned, isEnvironmentalSensor
 
 
 def get_threshold_value(subject_dict, subject, file):
@@ -587,7 +664,7 @@ def process_out_month(out_month, year, month, st=None, et=None, filter_duration=
             # Check if duration filtering is enabled
             if filter_duration:
                 # Calculate the duration of each event in minutes
-                sub_out_month['duration'] = (sub_out_month['ts_off'] - sub_out_month['ts_on']).dt.total_seconds() / 60
+                sub_out_month['duration'] = (sub_out_month['we'] - sub_out_month['ws']).dt.total_seconds() / 60
                 
                 # Filter for events longer than the minimum duration (default 10 minutes)
                 sub_out_month = sub_out_month[sub_out_month['duration'] > min_duration].copy()

@@ -7,13 +7,13 @@ Created on Wed Aug 28 09:14:38 2024
 """
 #%%
 from utility import *
-data_path = '/home/hubble/Downloads/Data_upTo_25Sep/DATA2'
+data_path = '/home/hubble/Downloads/Data_upTo_25Sep(1)/DATA2'
 #%%
 # subject_dfs = read_csv_files_v2(data_path)
-# with open('data_matteo_up_to_september_25_2024.pkl', 'wb') as file:
+# with open('data_matteo_upto_september_25_2024.pkl', 'wb') as file:
 #     pickle.dump(subject_dfs, file)
 
-with open('/home/hubble/work/serenade/src/data_matteo_up_to_september_25_2024.pkl', 'rb') as file:
+with open('/home/hubble/work/serenade/src/data_matteo_upto_september_25_2024.pkl', 'rb') as file:
     data = pickle.load(file)
 
 #%%
@@ -60,19 +60,19 @@ for sn in range(len(subjects)):
     subjectwise_count[subject_name] = [all_temperature_peak_counts, all_out_event_timings]
 
 
-# with open('outcome_matteos_data.pkl', 'wb') as file:
-#     pickle.dump(subjectwise_count, file)
+with open('outcomeeee_matteos_data.pkl', 'wb') as file:
+    pickle.dump(subjectwise_count, file)
 
 #%%
 
-st = pd.to_datetime('06:00:00').time()
-et = pd.to_datetime('09:59:00').time()
+# st = pd.to_datetime('06:00:00').time()
+# et = pd.to_datetime('09:59:00').time()
 
-st = pd.to_datetime('11:00:00').time()
-et = pd.to_datetime('14:59:00').time()
+# st = pd.to_datetime('11:00:00').time()
+# et = pd.to_datetime('14:59:00').time()
 
-st = pd.to_datetime('18:00:00').time()
-et = pd.to_datetime('23:59:00').time()
+# st = pd.to_datetime('18:00:00').time()
+# et = pd.to_datetime('23:59:00').time()
 
 st = None
 et = None

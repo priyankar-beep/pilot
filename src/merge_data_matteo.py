@@ -10,7 +10,7 @@ from natsort import natsorted
 
 
 # Path to the 'DATA' folder
-data_path = '/home/hubble/Downloads/Data_upTo_25Sep/DATA2/'
+data_path = '/home/hubble/Downloads/Data_upTo_25Sep(1)/DATA2/'
 
 # Function to sort the files based on month and year
 def sort_files_by_date(file_list):
