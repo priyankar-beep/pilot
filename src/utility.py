@@ -261,9 +261,23 @@ def process_sensor_data(df):
     df_conc = pd.concat([df_on, df_off['ts_off']], axis=1)
 
     df_conc['duration_ms'] = df_conc['ts_off'] - df_conc['ts_on']
+    
 
-    df_conc['ts_on'] = pd.to_datetime(df_conc['ts_on'], unit='ms')
-    df_conc['ts_off'] = pd.to_datetime(df_conc['ts_off'], unit='ms')
+
+    # df_conc['ts_on'] = pd.to_datetime(df_conc['ts_on'], unit='ms')
+    df_conc['ts_on'] = (
+        pd.to_datetime(df_conc['ts_on'], unit='ms')  # Step 1: Convert milliseconds to datetime
+        .dt.tz_localize('UTC')                        # Step 2: Localize to UTC
+        .dt.tz_convert('Europe/Rome')                 # Step 3: Convert to Europe/Rome timezone
+    )
+
+    
+    # df_conc['ts_off'] = pd.to_datetime(df_conc['ts_off'], unit='ms')
+    df_conc['ts_off'] = (
+        pd.to_datetime(df_conc['ts_off'], unit='ms')  # Step 1: Convert milliseconds to datetime
+        .dt.tz_localize('UTC')                        # Step 2: Localize to UTC
+        .dt.tz_convert('Europe/Rome')                 # Step 3: Convert to Europe/Rome timezone
+    )
 
     df_conc['duration_datetime'] = df_conc['ts_off'] - df_conc['ts_on']
 
@@ -308,7 +322,7 @@ def process_sensor_data(df):
 
 #     return df_cleaned, rows_to_drop
 
-def remove_continuous_on_off(df_cleaned_1):
+def remove_continuous_on_off_v2(df_cleaned_1):
     df_cleaned = df_cleaned_1.copy()
     rows_to_drop = []
     
@@ -350,21 +364,21 @@ def remove_continuous_on_off(df_cleaned_1):
     return df_cleaned, isEnvironmentalSensor    
 
 
-# def remove_continuous_on_off(df_cleaned_1):
-#     df_cleaned = df_cleaned_1.copy()
+def remove_continuous_on_off_v1(df_cleaned_1):
+    df_cleaned = df_cleaned_1.copy()
     
-#     contains_on = df_cleaned['sensor_status'].isin(['on']).any()
-#     contains_off = df_cleaned['sensor_status'].isin(['off']).any()
-#     isEnvironmentalSensor = -999
-#     if contains_on and contains_off:
-#         isEnvironmentalSensor = True
-#         for i in reversed(list(df_cleaned.index)[1:]):
-#             if df_cleaned.loc[i].sensor_status == df_cleaned.iloc[df_cleaned.index.get_loc(i)-1].sensor_status:
-#                 df_cleaned.drop([i], inplace=True)
-#                 # print(i)
-#     else:
-#         isEnvironmentalSensor = False
-#     return df_cleaned, isEnvironmentalSensor
+    contains_on = df_cleaned['sensor_status'].isin(['on']).any()
+    contains_off = df_cleaned['sensor_status'].isin(['off']).any()
+    isEnvironmentalSensor = -999
+    if contains_on and contains_off:
+        isEnvironmentalSensor = True
+        for i in reversed(list(df_cleaned.index)[1:]):
+            if df_cleaned.loc[i].sensor_status == df_cleaned.iloc[df_cleaned.index.get_loc(i)-1].sensor_status:
+                df_cleaned.drop([i], inplace=True)
+                # print(i)
+    else:
+        isEnvironmentalSensor = False
+    return df_cleaned, isEnvironmentalSensor
 
 
 def get_threshold_value(subject_dict, subject, file):
@@ -398,8 +412,10 @@ def convert_real_valued_to_on_off(threshold_value, df):
                 ts_off = row['ts']
                 ts_on_list.append(ts_on)
                 ts_off_list.append(ts_off)
-                temp_list.append([ind1, row['sensor_id'], 'on', ts_on, row['subject_id'], pd.to_datetime(ts_on,unit='ms')])
-                temp_list.append([ind2, row['sensor_id'], 'off', ts_off, row['subject_id'],pd.to_datetime(ts_off,unit = 'ms')])
+                # temp_list.append([ind1, row['sensor_id'], 'on', ts_on, row['subject_id'], pd.to_datetime(ts_on,unit='ms')])
+                temp_list.append([ind1, row['sensor_id'], 'on', ts_on, row['subject_id'], pd.to_datetime(ts_on, unit='ms').tz_localize('UTC').tz_convert('Europe/Rome')])
+                # temp_list.append([ind2, row['sensor_id'], 'off', ts_off, row['subject_id'],pd.to_datetime(ts_off,unit = 'ms')])
+                temp_list.append([ind2, row['sensor_id'],'off', ts_off, row['subject_id'],pd.to_datetime(ts_off, unit='ms').tz_localize('UTC').tz_convert('Europe/Rome')])
                 is_on = False
 
         result_df = pd.DataFrame(temp_list, columns=['index','sensor_id','sensor_status', 'ts', 'subject_id','ts_datetime'])
@@ -426,12 +442,15 @@ def read_csv_files_v2(data_path):
                 if len(df) > 0:
                     df = df[~df['sensor_status'].isin(['unavailable', 'unknown'])]    
                     df.reset_index(drop=True, inplace=True)
-                    df, isEnvironmentalSensor = remove_continuous_on_off(df)
-                    df['ts_datetime'] = pd.to_datetime(df['ts'], unit='ms')
-                    # print(folder_name, df.iloc[0]['ts_datetime'], df.iloc[-1]['ts_datetime'])
+                    df, isEnvironmentalSensor = remove_continuous_on_off_v2(df)
+                    # df['ts_datetime'] = pd.to_datetime(df['ts'], unit='ms')
+                    df['ts_datetime_utc'] = pd.to_datetime(df['ts'], unit='ms')
+                    df['ts_datetime_utc'] = df['ts_datetime_utc'].dt.tz_localize('UTC')
+                    df['ts_datetime'] = df['ts_datetime_utc'].dt.tz_convert('Europe/Rome')
+                    # df.drop(columns=['ts_datetime_utc'], inplace=True)
                     if not isEnvironmentalSensor:
                       
-                        if folder_name in ['Stove_Hum_Temp_temp', 'Stove_Hum_Temp_humidity', 'Shower_Hum_Temp_humidity', 'Shower_Hum_Temp_temp']:
+                        if folder_name in ['Shower_Hum_Temp','Stove_Hum_Temp','Stove_Hum_Temp_temp', 'Stove_Hum_Temp_humidity', 'Shower_Hum_Temp_humidity', 'Shower_Hum_Temp_temp']:
                             print(subject_s, folder_name, 'Not a binary Sensor')
                             df['sensor_status'] = pd.to_numeric(df['sensor_status'], errors='coerce')
                             dfs_dict[folder_name] = [df, pd.DataFrame()]

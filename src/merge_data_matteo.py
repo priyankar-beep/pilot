@@ -1,17 +1,12 @@
 import pandas as pd, pickle, os
 from natsort import natsorted
  
-
 # # Load the pickle file
 # with open('/home/hubble/Downloads/gpt_zeroshot_subject_a.pkl', 'rb') as file:
 #     data = pickle.load(file)
-
-
-
-
 # Path to the 'DATA' folder
 data_path = '/home/hubble/Downloads/Data_upTo_25Sep(1)/DATA2/'
-
+data_path = '/home/hubble/Downloads/DATA_no_time_shift/DATA2'
 # Function to sort the files based on month and year
 def sort_files_by_date(file_list):
     months = {

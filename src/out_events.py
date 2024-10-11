@@ -7,13 +7,18 @@ Created on Wed Aug 28 09:14:38 2024
 """
 #%%
 from utility import *
-data_path = '/home/hubble/Downloads/Data_upTo_25Sep(1)/DATA2'
+# data_path = '/home/hubble/Downloads/Data_upTo_25Sep(1)/DATA2'
+data_path = '/home/hubble/Downloads/DATA_no_time_shift/DATA2'
 #%%
+## The following commented code runs only one time
 # subject_dfs = read_csv_files_v2(data_path)
-# with open('data_matteo_upto_september_25_2024.pkl', 'wb') as file:
+# with open('data_matteo_upto_september_25_2024_without_timeshift.pkl', 'wb') as file:
 #     pickle.dump(subject_dfs, file)
 
-with open('/home/hubble/work/serenade/src/data_matteo_upto_september_25_2024.pkl', 'rb') as file:
+with open('/home/hubble/work/serenade/data/data_matteo_upto_september_25_2024.pkl', 'rb') as file:
+    data = pickle.load(file)
+
+with open('/home/hubble/work/serenade/data/data_matteo_upto_september_25_2024.pkl', 'rb') as file:
     data = pickle.load(file)
 
 #%%
@@ -60,7 +65,7 @@ for sn in range(len(subjects)):
     subjectwise_count[subject_name] = [all_temperature_peak_counts, all_out_event_timings]
 
 
-with open('outcomeeee_matteos_data.pkl', 'wb') as file:
+with open('outcome_matteos_data.pkl', 'wb') as file:
     pickle.dump(subjectwise_count, file)
 
 #%%
@@ -77,49 +82,51 @@ with open('outcomeeee_matteos_data.pkl', 'wb') as file:
 st = None
 et = None
 
+with open('/home/hubble/work/serenade/src/outcome_matteos_data.pkl', 'rb') as file:
+    subjectwise_count = pickle.load(file)
 #%% 
 # Compute count_out and temperature peaks for each subject
-plot_df_all = {}
-
-# Loop over each subject in subjectwise_count
-for subject in list(subjectwise_count.keys()):
-    print(f"Processing subject: {subject}")
+    plot_df_all = {}
     
-    temp_subject = subjectwise_count[subject]
-    outs = temp_subject[1]
-    peaks_temperature = temp_subject[0]
-
-    years = list(outs.keys())
-
-    # Loop over years and months for each subject
-    data_to_plot = []
-    for year in years:
-        outs_year = outs[year]
-        peaks_year = peaks_temperature[year]
-        months = list(outs_year.keys())
+    # Loop over each subject in subjectwise_count
+    for subject in list(subjectwise_count.keys()):
+        print(f"Processing subject: {subject}")
         
-        for month in months:
-            out_month = outs_year[month]
-            peaks_month = peaks_year[month]
-
-            # Process outs
-            count_outs, outs_df = process_out_month(out_month, year, month, st=st, et=et, filter_duration=False)
-
-            # Process peaks_temperature
-            count_temperature_peaks, temperature_df = process_peaks_month(peaks_month, year, month, st=st, et=et)
-
-            # Append the results to the final list for all subjects
-            data_to_plot.append({
-                'subject': subject,
-                'year': year,
-                'month': month,
-                'count_outs': count_outs,
-                'count_temperature_peaks': count_temperature_peaks
-            })
-
-    # Convert the collected data into a DataFrame
-    df_to_plot = pd.DataFrame(data_to_plot)
-    plot_df_all[subject] = df_to_plot
+        temp_subject = subjectwise_count[subject]
+        outs = temp_subject[1]
+        peaks_temperature = temp_subject[0]
+    
+        years = list(outs.keys())
+    
+        # Loop over years and months for each subject
+        data_to_plot = []
+        for year in years:
+            outs_year = outs[year]
+            peaks_year = peaks_temperature[year]
+            months = list(outs_year.keys())
+            
+            for month in months:
+                out_month = outs_year[month]
+                peaks_month = peaks_year[month]
+    
+                # Process outs
+                count_outs, outs_df = process_out_month(out_month, year, month, st=st, et=et, filter_duration=False)
+    
+                # Process peaks_temperature
+                count_temperature_peaks, temperature_df = process_peaks_month(peaks_month, year, month, st=st, et=et)
+    
+                # Append the results to the final list for all subjects
+                data_to_plot.append({
+                    'subject': subject,
+                    'year': year,
+                    'month': month,
+                    'count_outs': count_outs,
+                    'count_temperature_peaks': count_temperature_peaks
+                })
+    
+        # Convert the collected data into a DataFrame
+        df_to_plot = pd.DataFrame(data_to_plot)
+        plot_df_all[subject] = df_to_plot
 
 #%% Plot the graph
 for subject in list(plot_df_all.keys()):
