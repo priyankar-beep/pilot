@@ -15,11 +15,11 @@ data_path = '/home/hubble/Downloads/DATA_no_time_shift/DATA2'
 # with open('data_matteo_upto_september_25_2024_without_timeshift.pkl', 'wb') as file:
 #     pickle.dump(subject_dfs, file)
 
-with open('/home/hubble/work/serenade/data/data_matteo_upto_september_25_2024.pkl', 'rb') as file:
-    data = pickle.load(file)
+# with open('/home/hubble/work/serenade/data/data_matteo_upto_september_25_2024.pkl', 'rb') as file:
+#     data = pickle.load(file)
 
-with open('/home/hubble/work/serenade/data/data_matteo_upto_september_25_2024.pkl', 'rb') as file:
-    data = pickle.load(file)
+# with open('/home/hubble/work/serenade/data/data_matteo_upto_september_25_2024.pkl', 'rb') as file:
+#     data = pickle.load(file)
 
 #%%
 subjects = list(data.keys())

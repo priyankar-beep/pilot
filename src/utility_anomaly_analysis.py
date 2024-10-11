@@ -17,27 +17,63 @@ import plotly.graph_objects as go
 from scipy.signal import find_peaks
 
 
-with open('/home/hubble/work/serenade/data/data_matteo_upto_september_25_2024_corrected.pkl', 'rb') as file:
+with open('/home/hubble/work/serenade/data/data_matteo_upto_september_25_2024_without_timeshift.pkl', 'rb') as file:
     data = pickle.load(file)
     
-def plot_sensor_readings_2(arranged_data_np, complete_days):
-    plt.figure(figsize=(12, 8))
-    plt.imshow(arranged_data_np, cmap='hot', aspect='auto')
+# def plot_sensor_readings_2(arranged_data_np, complete_days):
+#     plt.figure(figsize=(12, 8))
+#     plt.imshow(arranged_data_np, cmap='hot', aspect='auto')
     
 
-    plt.colorbar(label='Sensor Status')
-    plt.title('Sensor Readings as Image')
-    plt.xticks(ticks=np.arange(0, 1440, 60), labels=[f'{h:02d}:00' for h in range(24)])  # 24 hours in 'HH:MM' format
-    plt.xlabel('Time of the Day (HH:MM)')
-    # y_ticks = np.arange(0, len(arranged_data_np), 1)  # Change 5 to a higher number to reduce ticks further
-    tick_positions = np.arange(0, len(complete_days), 10)  # Adjust to show every 10th day if needed
-    plt.yticks(ticks=tick_positions, labels=[complete_days[i].strftime('%Y-%m-%d') for i in tick_positions])
-    # plt.yticks(ticks=y_ticks, labels=[str(complete_days[i]) for i in y_ticks])
-    plt.xticks(rotation=90)
-    # plt.yticks(rotation=0)
-    plt.grid(True)  
-    plt.tight_layout()  
-    plt.show()
+#     plt.colorbar(label='Sensor Status')
+#     plt.title('Sensor Readings as Image')
+#     plt.xticks(ticks=np.arange(0, 1440, 60), labels=[f'{h:02d}:00' for h in range(24)])  # 24 hours in 'HH:MM' format
+#     plt.xlabel('Time of the Day (HH:MM)')
+#     # y_ticks = np.arange(0, len(arranged_data_np), 1)  # Change 5 to a higher number to reduce ticks further
+#     tick_positions = np.arange(0, len(complete_days), 10)  # Adjust to show every 10th day if needed
+#     plt.yticks(ticks=tick_positions, labels=[complete_days[i].strftime('%Y-%m-%d') for i in tick_positions])
+#     # plt.yticks(ticks=y_ticks, labels=[str(complete_days[i]) for i in y_ticks])
+#     plt.xticks(rotation=90)
+#     # plt.yticks(rotation=0)
+#     # plt.grid(True)  
+#     plt.tight_layout()  
+#     plt.show()
+
+
+
+def plot_sensor_readings_2(arranged_data_np, complete_days):
+    # Create the figure
+    fig = go.Figure(data=go.Heatmap(
+        z=arranged_data_np,
+        colorscale='Hot',
+        x=[f'{h:02d}:00' for h in range(24)] * 60,  # 1440 minutes -> HH:MM format labels
+        y=[day.strftime('%Y-%m-%d') for day in complete_days],
+        colorbar=dict(title="Sensor Status")
+    ))
+
+    # Update layout
+    fig.update_layout(
+        title='Sensor Readings as Image',
+        xaxis_title='Time of the Day (HH:MM)',
+        yaxis_title='Date',
+        xaxis=dict(
+            tickmode='array',
+            tickvals=np.arange(0, 1440, 60),  # 60 minute intervals
+            ticktext=[f'{h:02d}:00' for h in range(24)],
+            tickangle=90
+        ),
+        yaxis=dict(
+            tickmode='array',
+            tickvals=np.arange(0, len(complete_days), 10),  # Adjust to show every 10th day
+            ticktext=[complete_days[i].strftime('%Y-%m-%d') for i in range(0, len(complete_days), 10)]
+        ),
+        height=800,
+        width=1000
+    )
+
+    # Show plot
+    fig.show()
+
 
 def plot_sensor_readings(arranged_data_np, complete_days, minute_index_mapping):
     plt.figure(figsize=(14, 10))
@@ -184,11 +220,7 @@ def arrange_data_by_day_numpy(df):
     plot_sensor_readings(arranged_data_np, complete_days, minute_index_mapping)
     return arranged_data_np, complete_days, arranged_peak_start_end_data_np, pd.DataFrame(datewise_peak_info_list)
 
-def arrange_data_by_day_numpy_environmentals(df):
-    # Ensure timestamps are in datetime format
-    df['ts_on'] = pd.to_datetime(df['ts_on'])
-    df['ts_off'] = pd.to_datetime(df['ts_off'])
-    
+def arrange_data_by_day_numpy_environmentals(df):  
     # Create a date range for complete days
     start_date = df['ts_on'].dt.date.min()
     end_date = df['ts_on'].dt.date.max()
@@ -197,17 +229,19 @@ def arrange_data_by_day_numpy_environmentals(df):
     daily_data_list = []
     for d in range(len(complete_days)):
         # Filter data for the current day
-        day = complete_days[d]
-        daily_data = df[df['ts_on'].dt.date == day]
-        all_minutes = pd.date_range(start=pd.Timestamp(day), end=pd.Timestamp(day) + pd.Timedelta(days=1) - pd.Timedelta(minutes=1), freq='min')
+        day = pd.Timestamp(complete_days[d]).tz_localize('Europe/Rome')
+        daily_data = df[df['ts_on'].dt.tz_convert('Europe/Rome').dt.date == day.date()]
+        # daily_data = df[df['ts_on'].dt.date == day]
+        all_minutes = pd.date_range(start=day, end=day + pd.Timedelta(days=1) - pd.Timedelta(minutes=1), freq='min', tz='Europe/Rome')
         daily_resampled = np.zeros((1440,), dtype=int)  # 1440 minutes in a day
         
         if daily_data.empty:
             daily_data_list.append(daily_resampled) 
             continue  
-        for _, row in daily_data.iterrows():
-            start_minute = (row['ts_on'] - pd.Timestamp(day)).total_seconds() // 60
-            end_minute = (row['ts_off'] - pd.Timestamp(day)).total_seconds() // 60
+        for a, row in daily_data.iterrows():
+            print(a, row)
+            start_minute = (row['ts_on'] - pd.Timestamp(day).tz_convert('Europe/Rome')).total_seconds() // 60
+            end_minute =  (row['ts_off'] - pd.Timestamp(day).tz_convert('Europe/Rome')).total_seconds() // 60
             
             if start_minute == end_minute:
                 daily_resampled[int(start_minute)] = 1

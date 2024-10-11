@@ -10,11 +10,15 @@ from utility_anomaly_analysis import *
 subject_id = 'subject_3'
 print(data[subject_id].keys())
 df = data[subject_id]['Stove_Hum_Temp_temp'][0].copy()
-specific_devices = ['Stove_Hum_Temp_temp', 'Stove_Hum_Temp_humidity', 'Shower_Hum_Temp_temp', 'Shower_Hum_Temp_humidity']
+specific_devices = ['Shower_Hum_Temp', 'Stove_Hum_Temp','Stove_Hum_Temp_temp', 'Stove_Hum_Temp_humidity', 'Shower_Hum_Temp_temp', 'Shower_Hum_Temp_humidity']
 
-
+with open('/home/hubble/work/serenade/data/data_matteo_upto_september_25_2024_corrected.pkl', 'rb') as file:
+    data = pickle.load(file)
+# subject_id = 'subject_2'
+# print(data[subject_name].keys())
 
 # arranged_np_data, complete_days, binarized_arranged_np_data = arrange_data_by_day_numpy(df)
+# df = data[subject_id]['MotionLivingroom'][1].copy()
 # arranged_np_data = arrange_data_by_day_numpy_environmentals(df)
 # filtered_df = df[~((df['ts_datetime'].dt.month.isin([7, 8])) & (df['ts_datetime'].dt.year == 2023))]
 
