@@ -9,7 +9,9 @@ from main_utility import *
 from subject_kitchen_device_mapping import *
 
 #%% Read the data
-
+with open('/home/hubble/work/serenade/data/subject_data_sept_2024.pkl', 'rb') as file:
+    data = pickle.load(file)
+subjects = natsorted(list(data.keys()))
 
 #%%
 cooking_devices = ['CoffeMachine', 'Cookware', 'Dishes', 'Dishes_Glasses', 'Dishes_Silverware', 'FoodStorage',\
@@ -25,27 +27,8 @@ cooking_devices = ['CoffeMachine', 'Cookware', 'Dishes', 'Dishes_Glasses', 'Dish
 #     pickle.dump(subject_dfs, file)
 
 
-def compute_daily_temperature(temp):
-    ### Compute daily average temperature
-    temp.loc[:, 'date'] = temp['ts_datetime'].dt.date
-    daily_avg = temp.groupby('date')['sensor_status'].mean().reset_index()
-    daily_avg.rename(columns={'sensor_status': 'daily_avg_temp'}, inplace=True)
-    temp = pd.merge(temp, daily_avg, on='date', how='left')
-    return temp
 
 
-
-def remove_peaks_below_daily_avg(temperature_df, peaks):
-    filtered_peaks = [
-        peak for peak in peaks
-        if temperature_df.loc[peak, 'sensor_status'] >= temperature_df.loc[peak, 'daily_avg_temp']
-    ]
-    
-    return filtered_peaks
-
-with open('/home/hubble/work/serenade/data/subject_data_sept_2024.pkl', 'rb') as file:
-    data = pickle.load(file)
-subjects = natsorted(list(data.keys()))
 
 #%%
 QUERY_INTERVAL_START = '00:00:00'  # Start of the day
@@ -55,9 +38,9 @@ specific_devices = ['Stove_Hum_Temp_temp', 'Stove_Hum_Temp_humidity', 'Shower_Hu
 
 # Define the devices where ts_datetime should be used instead of ts_on
 specific_devices = ['Stove_Hum_Temp_temp', 'Stove_Hum_Temp_humidity', 'Shower_Hum_Temp_temp', 'Shower_Hum_Temp_humidity']
-
+all_peaks_timings = []
 # First detect the temperature peak
-for sub in range(3,4):#len(subjects)):
+for sub in range(len(subjects)):
     subject = subjects[sub]
     subject_kitchen_devices = sorted(subject_devices[subject])
     subject_kitchen_devices2 = sorted(subject_devices[subject])
@@ -73,6 +56,8 @@ for sub in range(3,4):#len(subjects)):
     # end_date = (start_date + pd.offsets.MonthEnd(0)).normalize()
     end_date = df_stove_temperature['ts_datetime'].max()
     monthly_range = pd.date_range(start=start_date, end=end_date, freq='M')
+    monthly_usage = {}
+    monthly_temp_peaks = {}
     
     for month_end in monthly_range:
         month_start = month_end - pd.offsets.MonthEnd(1) + pd.offsets.Day(1)
@@ -116,11 +101,16 @@ for sub in range(3,4):#len(subjects)):
                 peak_index = indices[j]
                 peak_temperature = temperature_df.iloc[peak_index]['sensor_status'] # Peak Temperature
                 room_temperature = temperature_df.iloc[peak_index]['daily_avg_temp'] # Room Temperature
+                std = temperature_df.iloc[peak_index]['daily_avg_std']
                 peak_time = temperature_df['ts_datetime'].iloc[peak_index] # When did the peak occur
-                duration, left, right = find_peak_duration_v3(temperature_df.copy(), peak_index,room_temperature)
+                duration, left, right = find_peak_duration_v3(temperature_df.copy(), peak_index,room_temperature, 3, std)
                 left_time = temperature_df['ts_datetime'].iloc[left]
                 right_time = temperature_df['ts_datetime'].iloc[right]
                 
+                if left_time.date() != right_time.date():
+                    pass
+                
+                all_peaks_timings.append({'subject_id':subject,'peak_start':left_time ,'peak_end':right_time})
                 ## Devices used during the peak
                 filtered_data = daily_environmental_data[
                     (daily_environmental_data['ts_on'] >= left_time) & 
@@ -132,107 +122,45 @@ for sub in range(3,4):#len(subjects)):
             df_peak_start_end_times = pd.DataFrame(peak_start_end_times)
             date_peak_times[date] = df_peak_start_end_times
             date_cooking_devices[date] = pd.concat(cooking_devices_list, ignore_index=True)
-        plot_daily_activity(date_peak_times, date_cooking_devices, subject, subject_kitchen_devices, '/home/hubble')
-                
+        percentage_usage = calculate_device_usage_count(date_peak_times, date_cooking_devices, subject_kitchen_devices2)
+        monthly_usage[month_start] = percentage_usage
+        monthly_temp_peaks[month_start] = date_peak_times
+        # plot_daily_activity(date_peak_times, date_cooking_devices, subject, subject_kitchen_devices, '/home/hubble/cooking')
+    # plot_device_usage_heatmap(monthly_usage, subject, "/home/hubble/cooking")
+    monthly_peak_counts, monthly_avg_durations, monthly_days_with_peaks = calculate_monthly_peak_stats(monthly_temp_peaks)
+    # plot_temperature_peak_stats(monthly_peak_counts, monthly_avg_durations, monthly_days_with_peaks, "/home/hubble/cooking", subject)
 
-def calculate_device_usage_percentage(usage_counts, total_temp_peak_count):
-    # Initialize a dictionary to store percentage usage
-    percentage_usage = {}
+#%%
+# Convert to DataFrame
+df_peaks = pd.DataFrame(all_peaks_timings)
+# Calculate duration in minutes
+df_peaks['duration'] = (df_peaks['peak_end'] - df_peaks['peak_start']).dt.total_seconds() / 60
+# Sort by ascending order of duration
+df_peaks_sorted = df_peaks.sort_values(by='duration').reset_index(drop=True)
 
-    # Calculate the percentage for each device
-    for device, count in usage_counts.items():
-        if total_temp_peak_count > 0:  # Avoid division by zero
-            percentage_usage[device] = (count / total_temp_peak_count) * 100
-        else:
-            percentage_usage[device] = 0.0  # If no temperature peaks, set to 0
+# Sort the DataFrame and exclude the last four durations
+df_peaks_sorted = df_peaks.sort_values(by='duration').reset_index(drop=True)
+durations = df_peaks_sorted['duration'][:-4]  # Exclude the last four entries
 
-    return percentage_usage
+# Calculate the CDF for the modified durations
+cdf = np.arange(1, len(durations) + 1) / len(durations)
 
-def calculate_device_usage_count(date_peak_times, date_cooking_devices, subject_kitchen_devices2):
-    # Initialize a dictionary to store usage counts
-    usage_counts = {device: 0 for device in subject_kitchen_devices2}
+# Create the plot
+plt.figure(figsize=(10, 6))
+plt.plot(durations, cdf, marker='o', linestyle='-', color='b')
 
-    # Iterate through the date_peak_times dictionary
-    dates = list(date_peak_times.keys())
-    temp_peak_count = 0
-    for i in range(len(dates)):
-        date = dates[i]
-        peak_df = date_peak_times[date]
-        temp_peak_count = temp_peak_count + len(peak_df)
-        
-        # Get the cooking devices for the same date
-        cooking_df = date_cooking_devices.get(date)
+# Set x-axis ticks at intervals of 30 minutes up to the maximum duration
+plt.xticks(np.arange(0, durations.max() + 30, 30),rotation=90)
 
-        if cooking_df is not None and not cooking_df.empty:
-            # Iterate through each temperature peak activation
-            for _, peak_row in peak_df.iterrows():
-                peak_start = peak_row['ts_on']
-                peak_end = peak_row['ts_off']
-                
-                # Check for each device if it was used at least once during the temperature peak
-                for device in subject_kitchen_devices2:
-                    # print(device)
-                    if device in cooking_df['sensor_id'].values:
-                        device_data = cooking_df[cooking_df['sensor_id'] == device]
-                        
-                        # Check for any overlap with the temperature peak period
-                        for _, device_row in device_data.iterrows():
-                            if (device_row['ts_on'] < peak_end) and (device_row['ts_off'] > peak_start):
-                                usage_counts[device] += 1
-                                break  # No need to check more if we found an activation
-    percentage_usage = calculate_device_usage_percentage(usage_counts, temp_peak_count)
-    return usage_counts
+# Set y-axis ticks at finer intervals (e.g., every 10%)
+plt.yticks(np.arange(0, 1.1, 0.1))
 
-# Example Usage:
-# Assuming date_peak_times and date_cooking_devices are defined
-# date_peak_times = {
-#     '2024-03-01': temperature_peak_df,  # DataFrame of temperature peaks
-#     # ... other dates
-# }
-# date_cooking_devices = {
-#     '2024-03-01': cooking_devices_df,  # DataFrame of device usage
-#     # ... other dates
-# }
-subject_kitchen_devices = [
-    'Cookware',
-    'Dishes_Glasses',
-    'Freezer',
-    'Microwave',
-    'MotionKitchen',
-    'Refrigerator',
-    'Silverware'
-]
+# Labeling axes and title
+plt.xlabel('Temperature Peak Duration in minutes', fontsize=12)
+plt.ylabel('Cumulative Percentage of Points (value * 100)', fontsize=12)
+plt.title('Cumulative Distribution Function of Duration', fontsize=12)
 
-device_usage_counts = calculate_device_usage_count(date_peak_times, date_cooking_devices, subject_kitchen_devices)
+# Show the plot
+plt.grid()
+plt.show()
 
-# Print the results
-for device, count in device_usage_counts.items():
-    print(f"Device: {device}, Count of activations during Temperature Peak: {count}")
-
-
-# Example Usage:
-# Assuming date_peak_times and date_cooking_devices are defined
-# date_peak_times = {
-#     '2024-03-01': temperature_peak_df,  # DataFrame of temperature peaks
-#     # ... other dates
-# }
-# date_cooking_devices = {
-#     '2024-03-01': cooking_devices_df,  # DataFrame of device usage
-#     # ... other dates
-# }
-
-device_usage_percentages = calculate_device_usage_percentage(date_peak_times, date_cooking_devices)
-
-# Print the results
-for date, percentage in device_usage_percentages.items():
-    print(f"Date: {date}, Percentage of devices used during Temperature Peak: {percentage:.2f}%")
-
-
-
-
-
-
-
-
-
-        

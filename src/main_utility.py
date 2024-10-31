@@ -8,7 +8,11 @@ Created on Wed Oct 23 14:28:15 2024
 
 import numpy as np, pandas as pd, os, pickle, glob
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdate
 import matplotlib.dates as mdates
+
+import seaborn as sns
+
 
 from natsort import natsorted
 from scipy.signal import find_peaks
@@ -537,13 +541,13 @@ def non_shower_stove_data(device_dict, specific_devices, start_time, end_time, t
     
     return merged_df
 
-def find_peak_duration_v3(daily_data, peak_index, daily_avg_temperature, k=3):
+def find_peak_duration_v3(daily_data, peak_index, daily_avg_temperature, k, std):
     left_index = peak_index
     below_count_left = 0
     
     # Traverse left until we find k continuous points below or equal to the daily average temperature
     while left_index > 0:
-        if daily_data['sensor_status'].iloc[left_index] <= (daily_avg_temperature+1):
+        if daily_data['sensor_status'].iloc[left_index] <= (daily_avg_temperature+std):
             below_count_left += 1
             # Check if we have found k points below or equal to the daily average temperature
             if below_count_left == k:
@@ -562,7 +566,7 @@ def find_peak_duration_v3(daily_data, peak_index, daily_avg_temperature, k=3):
     
     # Traverse right until we find k continuous points below or equal to the daily average temperature
     while right_index < len(daily_data) - 1:
-        if daily_data['sensor_status'].iloc[right_index + 1] <= (daily_avg_temperature+1):
+        if daily_data['sensor_status'].iloc[right_index + 1] <= (daily_avg_temperature+std):
             below_count_right += 1
             # Check if we have found k points below or equal to the daily average temperature
             if below_count_right == k:
@@ -579,6 +583,36 @@ def find_peak_duration_v3(daily_data, peak_index, daily_avg_temperature, k=3):
     # Calculate duration in terms of index difference
     duration = right_index - left_index
     return duration, left_index, right_index
+
+
+
+def plot_device_usage_heatmap(monthly_usage, subject, save_path):
+    monthly_df = pd.DataFrame(monthly_usage).T.sort_index()
+    monthly_df.index = monthly_df.index.strftime('%Y-%m')  # Format index as year-month
+    
+    # Create subject-specific folder if it doesn't exist
+    subject_folder = os.path.join(save_path, f"{subject}_device_usage")
+    os.makedirs(subject_folder, exist_ok=True)
+    
+    # Plot the heatmap
+    plt.figure(figsize=(10, 6))
+    sns.heatmap(monthly_df, annot=True, cmap="YlGnBu", fmt=".1f", linewidths=0.5)
+
+    # Title and labels
+    plt.title(f'Percentage of times a device used during temperature peaks in kitchen- {subject}')
+    plt.xlabel("Devices")
+    plt.ylabel("Month")
+    plt.xticks(rotation=45)
+    plt.yticks(rotation=0)
+    plt.tight_layout()
+
+    # Save plot to subject folder
+    save_file = os.path.join(subject_folder, f"{subject}_device_usage_heatmap.png")
+    plt.savefig(save_file, bbox_inches="tight")
+    plt.close()  # Close plot to free memory
+
+    print(f"Heatmap saved to {save_file}")
+
 
 
 def plot_daily_activity(date_peak_times, date_cooking_devices, subject, subject_kitchen_devices, save_path):
@@ -618,10 +652,20 @@ def plot_daily_activity(date_peak_times, date_cooking_devices, subject, subject_
         # Set y-ticks to include all kitchen devices
         plt.yticks(subject_kitchen_devices)
         
-        # Set the x-axis to show the time
-        plt.gca().xaxis.set_major_locator(mdates.HourLocator(interval=1))
-        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M', tz='Europe/Rome'))
-        plt.xticks(rotation=45)
+        # Set the x-axis to show the time with more ticks if needed
+        if not concated_df.empty:
+            time_range = concated_df['ts_on'].min(), concated_df['ts_off'].max()
+            plt.xlim(time_range)
+            
+            # Dynamically set x-ticks
+            plt.gca().xaxis.set_major_locator(mdates.MinuteLocator(interval=15))  # Show ticks every 10 minutes
+            plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M', tz='Europe/Rome'))
+            plt.xticks(rotation=45)
+        else:
+            # Handle case with no data
+            plt.xlim(pd.Timestamp.now(), pd.Timestamp.now() + pd.Timedelta(hours=1))
+            plt.gca().xaxis.set_major_locator(mdates.MinuteLocator(interval=10))
+            plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M', tz='Europe/Rome'))
         
         # Labels and title
         plt.xlabel('Time of Day (Europe/Rome)')
@@ -635,6 +679,284 @@ def plot_daily_activity(date_peak_times, date_cooking_devices, subject, subject_
         plt.close()  # Close the figure to free up memory
 
 
+
+# def compute_daily_temperature(temp):
+#     ### Compute daily average temperature
+#     temp.loc[:, 'date'] = temp['ts_datetime'].dt.date
+#     daily_avg = temp.groupby('date')['sensor_status'].median().reset_index()
+#     daily_avg.rename(columns={'sensor_status': 'daily_avg_temp'}, inplace=True)
+#     temp = pd.merge(temp, daily_avg, on='date', how='left')
+#     return temp
+
+
+def compute_daily_temperature(temp):
+    # Extract date from 'ts_datetime'
+    temp.loc[:, 'date'] = temp['ts_datetime'].dt.date
+    
+    # Compute daily median and standard deviation for 'sensor_status'
+    daily_stats = temp.groupby('date')['sensor_status'].agg(
+        daily_avg_temp='median',  # Median renamed to daily_avg_temp
+        daily_avg_std='std'       # Standard deviation renamed to daily_avg_std
+    ).reset_index()
+    
+    # Merge the computed stats back into the original DataFrame
+    temp = pd.merge(temp, daily_stats, on='date', how='left')
+    
+    return temp
+
+def remove_peaks_below_daily_avg(temperature_df, peaks):
+    filtered_peaks = [
+        peak for peak in peaks
+        if temperature_df.loc[peak, 'sensor_status'] > (
+            temperature_df.loc[peak, 'daily_avg_temp'] + temperature_df.loc[peak, 'daily_avg_std']
+        )
+    ]
+    
+    return filtered_peaks
+
+
+# def remove_peaks_below_daily_avg(temperature_df, peaks):
+#     filtered_peaks = [
+#         peak for peak in peaks
+#         if temperature_df.loc[peak, 'sensor_status'] > temperature_df.loc[peak, 'daily_avg_temp'] +1
+#     ]
+    
+#     return filtered_peaks
+
+
+# def plot_daily_activity(date_peak_times, date_cooking_devices, subject, subject_kitchen_devices, save_path):
+#     # Create a folder for the subject
+#     import matplotlib.dates as mdates
+
+#     subject_folder = os.path.join(save_path, subject)
+#     os.makedirs(subject_folder, exist_ok=True)  # Create the directory if it doesn't exist
+
+#     # Iterate through each date in the dictionaries
+#     dates_key = list(date_peak_times.keys())
+#     peaks_df = list(date_peak_times.values())
+#     devices_df = list(date_cooking_devices.values())
+    
+#     # Iterate through each date index
+#     for i in range(len(dates_key)):
+#         date_val = dates_key[i]
+#         peak_df = peaks_df[i]
+#         device_df = devices_df[i]
+        
+#         # Concatenate the dataframes
+#         concated_df = pd.concat([peak_df, device_df])
+        
+#         # Create a plot
+#         plt.figure(figsize=(10, 6))
+        
+#         # Plot for each device in subject_kitchen_devices
+#         for device in subject_kitchen_devices:
+#             device_data = concated_df[concated_df['sensor_id'] == device]
+            
+#             if not device_data.empty:
+#                 for idx, row in device_data.iterrows():
+#                     plt.plot([row['ts_on'], row['ts_off']], [device, device], color='blue', linewidth=10)
+#             else:
+#                 # Get the minimum ts_on for the empty device
+#                 min_ts_on = concated_df['ts_on'].min() if not concated_df.empty else pd.Timestamp.now()
+#                 plt.plot([min_ts_on, min_ts_on], [device, device], color='blue', linewidth=10)
+        
+#         # Set y-ticks to include all kitchen devices
+#         plt.yticks(subject_kitchen_devices)
+        
+#         # Set the x-axis to show the time
+#         plt.gca().xaxis.set_major_locator(mdates.HourLocator(interval=1))
+#         plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M', tz='Europe/Rome'))
+#         plt.xticks(rotation=45)
+        
+#         # Labels and title
+#         plt.xlabel('Time of Day (Europe/Rome)')
+#         plt.ylabel('Devices Used in Cooking')
+#         plt.title(f'Device Usage in Kitchen on {date_val} for {subject}')
+#         plt.grid()
+        
+#         # Save the plot with date name
+#         plt.tight_layout()
+#         plt.savefig(os.path.join(subject_folder, f'{date_val}.png'))  # Save as PNG
+#         plt.close()  # Close the figure to free up memory
+
+
+def plot_temperature_peak_stats(monthly_peak_counts, monthly_avg_durations, monthly_days_with_peaks, save_path, subject):
+    # Convert dictionaries to DataFrames for easier plotting
+    months = list(monthly_peak_counts.keys())
+    
+    peak_counts = [monthly_peak_counts[month] for month in months]
+    avg_durations = [monthly_avg_durations[month].total_seconds() / 60 for month in months]  # Convert to minutes
+    days_with_peaks = [monthly_days_with_peaks[month] for month in months]
+    
+    # Create a DataFrame for better handling
+    stats_df = pd.DataFrame({
+        'Month': months,
+        'Peak Counts': peak_counts,
+        'Average Duration (minutes)': avg_durations,
+        'Days with Peaks': days_with_peaks
+    })
+    
+    # Set Month as index for better plotting
+    stats_df.set_index('Month', inplace=True)
+    
+    # Create a folder for saving figures in the specified path if it doesn't exist
+    folder_name = os.path.join(save_path, f"{subject}_peak_stats")
+    os.makedirs(folder_name, exist_ok=True)
+    
+    # Create subplots
+    fig, axs = plt.subplots(3, 1, figsize=(10, 15), sharex=True)
+    
+    # Plot Peak Counts
+    axs[0].bar(stats_df.index, stats_df['Peak Counts'], color='lightblue')
+    axs[0].set_title(f'Temperature Peak Counts per Month - {subject}', fontsize=14)
+    axs[0].set_ylabel('Number of Peaks', fontsize=12)
+    axs[0].tick_params(axis='y', labelsize=10)
+
+    # Adding counts on top of the bars
+    for i, count in enumerate(peak_counts):
+        axs[0].text(i, count, str(count), ha='center', va='bottom', fontsize=10)
+
+    # Plot Average Duration
+    axs[1].bar(stats_df.index, stats_df['Average Duration (minutes)'], color='lightgreen')
+    axs[1].set_title(f'Average Duration of Temperature Peaks (in Minutes) - {subject}', fontsize=14)
+    axs[1].set_ylabel('Average Duration (minutes)', fontsize=12)
+    axs[1].tick_params(axis='y', labelsize=10)
+
+    # Adding average duration on top of the bars
+    for i, duration in enumerate(avg_durations):
+        axs[1].text(i, duration, f"{duration:.1f}", ha='center', va='bottom', fontsize=10)
+
+    # Plot Days with Peaks
+    axs[2].bar(stats_df.index, stats_df['Days with Peaks'], color='salmon')
+    axs[2].set_title(f'Days with Temperature Peaks per Month - {subject}', fontsize=14)
+    axs[2].set_ylabel('Number of Days', fontsize=12)
+    axs[2].tick_params(axis='y', labelsize=10)
+
+    # Adding days with peaks on top of the bars
+    for i, days in enumerate(days_with_peaks):
+        axs[2].text(i, days, str(days), ha='center', va='bottom', fontsize=10)
+
+    # Set x-axis label
+    axs[2].set_xlabel('Month-Year', fontsize=12)
+
+    # Rotate x-axis labels for better readability
+    plt.xticks(rotation=0)
+    
+    plt.tight_layout()
+
+    # Save the figure
+    save_filepath = os.path.join(folder_name, f"{subject}_temperature_peak_stats.png")
+    plt.savefig(save_filepath)
+    
+    # Close the figure to free up memory
+    plt.close()
+
+
+
+
+def calculate_monthly_peak_stats(monthly_temp_peaks):
+    # Initialize dictionaries to store monthly results
+    monthly_peak_counts = {}
+    monthly_avg_durations = {}
+    monthly_days_with_peaks = {}
+
+    # Extract list of month timestamps (keys) to use with index-based iteration
+    month_timestamps = list(monthly_temp_peaks.keys())
+    
+    # Loop through each month using index-based iteration
+    for i in range(len(month_timestamps)):
+        month_timestamp = month_timestamps[i]
+        daily_data = monthly_temp_peaks[month_timestamp]
+        
+        # Extract month-year in string format (e.g., '2024-06')
+        month_year = month_timestamp.strftime('%Y-%m')
+        
+        # Initialize accumulators for count and duration
+        total_duration = pd.Timedelta(0)  # Accumulate as timedelta
+        total_peaks = 0  # Accumulate peak count
+        unique_days = set()  # To track unique days with temperature peaks
+        
+        # Process each day's data in the current month
+        days = list(daily_data.keys())
+        for j in range(len(days)):
+            day = days[j]
+            df = daily_data[day]
+            
+            daily_peak_count = len(df)
+            total_peaks += daily_peak_count
+
+            # Add the day to unique_days set if any peaks are recorded
+            if daily_peak_count > 0:
+                unique_days.add(day)
+
+            # Calculate the duration for each peak on this day
+            for k in range(len(df)):
+                row = df.iloc[k]
+                duration = row['ts_off'] - row['ts_on']
+                total_duration += duration
+
+        # Store results for the month
+        if total_peaks > 0:
+            average_duration = total_duration / total_peaks
+        else:
+            average_duration = pd.Timedelta(0)  # No peaks observed, so average is 0
+        
+        # Save results in dictionaries
+        monthly_peak_counts[month_year] = total_peaks
+        monthly_avg_durations[month_year] = average_duration
+        monthly_days_with_peaks[month_year] = len(unique_days)  # Count of unique days
+
+    return monthly_peak_counts, monthly_avg_durations, monthly_days_with_peaks
+
+
+
+def calculate_device_usage_percentage(usage_counts, total_temp_peak_count):
+    # Initialize a dictionary to store percentage usage
+    percentage_usage = {}
+
+    # Calculate the percentage for each device
+    for device, count in usage_counts.items():
+        if total_temp_peak_count > 0:  # Avoid division by zero
+            percentage_usage[device] = (count / total_temp_peak_count) * 100
+        else:
+            percentage_usage[device] = 0.0  # If no temperature peaks, set to 0
+
+    return percentage_usage
+
+def calculate_device_usage_count(date_peak_times, date_cooking_devices, subject_kitchen_devices2):
+    # Initialize a dictionary to store usage counts
+    usage_counts = {device: 0 for device in subject_kitchen_devices2}
+
+    # Iterate through the date_peak_times dictionary
+    dates = list(date_peak_times.keys())
+    temp_peak_count = 0
+    for i in range(len(dates)):
+        date = dates[i]
+        peak_df = date_peak_times[date]
+        temp_peak_count = temp_peak_count + len(peak_df)
+        
+        # Get the cooking devices for the same date
+        cooking_df = date_cooking_devices.get(date)
+
+        if cooking_df is not None and not cooking_df.empty:
+            # Iterate through each temperature peak activation
+            for _, peak_row in peak_df.iterrows():
+                peak_start = peak_row['ts_on']
+                peak_end = peak_row['ts_off']
+                
+                # Check for each device if it was used at least once during the temperature peak
+                for device in subject_kitchen_devices2:
+                    # print(device)
+                    if device in cooking_df['sensor_id'].values:
+                        device_data = cooking_df[cooking_df['sensor_id'] == device]
+                        
+                        # Check for any overlap with the temperature peak period
+                        for _, device_row in device_data.iterrows():
+                            if (device_row['ts_on'] < peak_end) and (device_row['ts_off'] > peak_start):
+                                usage_counts[device] += 1
+                                break  # No need to check more if we found an activation
+    percentage_usage = calculate_device_usage_percentage(usage_counts, temp_peak_count)
+    return percentage_usage
 
 # # device_dict, start_time, end_time, target_year, target_month, specific_devices = data_subject, QUERY_INTERVAL_START, QUERY_INTERVAL_END, year_value, month_value,specific_devices
 # def non_shower_stove_data(device_dict, start_time, end_time, target_year, target_month, specific_devices):
