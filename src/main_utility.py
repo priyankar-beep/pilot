@@ -6,17 +6,62 @@ Created on Wed Oct 23 14:28:15 2024
 @author: hubble
 """
 
-import numpy as np, pandas as pd, os, pickle, glob
+import numpy as np, pandas as pd, os, pickle, glob, math
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdate
 import matplotlib.dates as mdates
-
+import pytz
+from datetime import datetime
 import seaborn as sns
-
-
 from natsort import natsorted
 from scipy.signal import find_peaks
 
+color_mapping = {
+    "CatFood": "#6953e6",
+    "CoffeMachine": "#a716d6",
+    "Cookware": "#7f2258",
+    "Dishes": "#8fb921",
+    "Dishes_Glasses": "#96c658",
+    "Dishes_Silverware": "#601031",
+    "FoodStorage": "#02a874",
+    "FoodStorageKitchen": "#210161",
+    "FoodStorageLivingRoom": "#de32e1",
+    "Freezer": "#d396dc",
+    "Glasses": "#6abf73",
+    "HouseEntrance": "#8556c2",
+    "Medicines": "#80776d",
+    "Microwave": "#0ec579",
+    "MotionBathroom": "#2b9568",
+    "MotionBedroom": "#5a34e3",
+    "MotionCloset": "#f41f2d",
+    "MotionDiningTable": "#f62dd2",
+    "MotionGuestRoom": "#20e5bb",
+    "MotionKitchen": "#e1ec9c",
+    "MotionLivingRoomSofa": "#92ef91",
+    "MotionLivingRoomTablet": "#5b1a69",
+    "MotionLivingroom": "#696ba8",
+    "MotionOffice": "#e2023e",
+    "MotionOtherRoom": "#216d5a",
+    "MotionOtherroom": "#f12964",
+    "MotionPrimaryBathroom": "#82457c",
+    "MotionSecondaryBathroom": "#8a5cd0",
+    "PlugTvHall": "#8e2926",
+    "PlugTvKitchen": "#409159",
+    "PresenceKitchen": "#552038",
+    "PresenceKitchen_Stove": "#8e1f49",
+    "PresenceKitchen_Table": "#6b6e57",
+    "PresenceLivingroom": "#12182f",
+    "PresenceLivingroom_Sofa": "#f10f8b",
+    "PresenceLivingroom_Table": "#7e82b4",
+    "Printer": "#f50617",
+    "Refrigerator": "#bacaad",
+    "Shower_Hum_Temp_humidity": "#0b306d",
+    "Shower_Hum_Temp_temp": "#cbf367",
+    "Silverware": "#bc5003",
+    "Stove_Hum_Temp_humidity": "#d93274",
+    "Stove_Hum_Temp_temp": "#b2fa98",
+    "WashingMachine": "#303676"
+}
 
 
 subjects_threshold_dict = {
@@ -125,6 +170,276 @@ subjects_threshold_dict = {
         'PlugTvKitchen': None
     }
 }
+
+
+def analyze_seasonal_peaks_with_duration(df_stove_temperature , prom = 1.5, theta = 40):
+    
+    # Load the data
+    df_stove_temperature['date'] = df_stove_temperature['ts_datetime'].dt.date
+    df_stove_temperature['daily_avg_temp'] = df_stove_temperature.groupby('date')['sensor_status'].transform('median')
+    df_stove_temperature['daily_avg_std'] = df_stove_temperature.groupby('date')['sensor_status'].transform('std')
+
+    # Step 1: Detect peaks ()
+    sensor_values = df_stove_temperature['sensor_status'].values # Get all the temperature readings in an array
+    peaks, _ = find_peaks(sensor_values, prominence = prom) # Find the peaks in temperature readings
+    df_stove_temperature['peaks'] = 0
+    df_stove_temperature.loc[peaks, 'peaks'] = 1  # Mark peaks as 1
+    
+    # # Remove the peaks below median_temperature_+ standard_deviation_in_tempearature_of the day in consideration
+    # def remove_peaks_below_daily_avg(temperature_df, peaks):
+    #     filtered_peaks = [
+    #         peak for peak in peaks
+    #         if temperature_df.loc[peak, 'sensor_status'] > (
+    #             temperature_df.loc[peak, 'daily_avg_temp'] + temperature_df.loc[peak, 'daily_avg_std']
+    #         )
+    #     ]
+    #     return filtered_peaks
+    # filtered_peaks = remove_peaks_below_daily_avg(df_stove_temperature, peaks)
+    # peaks = filtered_peaks
+    # # Step 7: Mark only the valid peaks as 1 in the 'peaks' column
+    # df_stove_temperature['peaks'] = 0  # Reset the peaks column to 0
+    # df_stove_temperature.loc[filtered_peaks, 'peaks'] = 1  # Mark the valid peaks
+    
+    df_stove_temperature.drop(columns=['date', 'daily_avg_temp', 'daily_avg_std'], inplace=True)
+
+    # Step 2: Define winter and summer months
+    winter_months = [11, 12, 1, 2]
+    summer_months = [3, 4, 5, 6, 7, 8, 9, 10]
+    
+    # Step 3: Calculate mean and standard deviation for winter and summer
+    winter_df = df_stove_temperature[df_stove_temperature['ts_datetime'].dt.month.isin(winter_months)].copy()
+    summer_df = df_stove_temperature[df_stove_temperature['ts_datetime'].dt.month.isin(summer_months)].copy()
+
+    # Keep original indices to map back to the main DataFrame
+    winter_df.reset_index(inplace=True)
+    summer_df.reset_index(inplace=True)
+    
+    # winter_df.set_index('index', inplace=True)
+    # summer_df.set_index('index', inplace=True)
+
+    winter_mean = winter_df['sensor_status'].mean()
+    winter_std = winter_df['sensor_status'].std()
+    summer_mean = summer_df['sensor_status'].mean()
+    summer_std = summer_df['sensor_status'].std()
+    
+    # Step 4: Initialize peak analysis dictionary with durations and additional info
+    peak_analysis = {
+        "winter": {"mean": winter_mean, "std_dev": winter_std, "categories": {}, "duration_percentages": {}},
+        "summer": {"mean": summer_mean, "std_dev": summer_std, "categories": {}, "duration_percentages": {}}
+    }
+
+    # Duration categories
+    duration_bins = [
+        (0, 5),
+        (5, 10),
+        (10, 20),
+        (20, 100),
+        (100, 200),
+        (200, float('inf'))  # For 200 minutes and above
+    ]
+    
+    duration_labels = ['< 5', '5-10', '10-20', '20-100', '100-200', '200+']
+    # df, df_stove_temperature, mean, std_dev, season_name = winter_df,df_stove_temperature, winter_mean, winter_std, "winter"
+    # df, df_stove_temperature, mean, std_dev, season_name = summer_df,df_stove_temperature, summer_mean, summer_std, "summer"
+    def categorize_peaks_with_duration(df, df_stove_temperature, mean, std_dev, season_name):
+        categories = {
+            "within_1_sigma": [],
+            "between_1_and_2_sigma": [],
+            "between_2_and_3_sigma": [],
+            "above_3_sigma": []
+        }
+        
+        # print( df[df['peaks'] == 1]['index'])
+        for index in df[df['peaks'] == 1]['index']:  # Use original index from reset
+            print(index)
+            # break
+            # Retrieve the value and deviation
+            value = df_stove_temperature.loc[index, 'sensor_status']
+            deviation = abs(value - mean) # mean represent the average tempearute of winter or summer 
+            # print(index, value, deviation) # peak index, temperature value, and difference from season mean
+            
+            # Classify the peak into a category
+            if deviation <= std_dev: # if the deviation in sensor reading below
+                category = "within_1_sigma"
+            elif std_dev < deviation <= 2 * std_dev:
+                category = "between_1_and_2_sigma"
+            elif 2 * std_dev < deviation <= 3 * std_dev:
+                category = "between_2_and_3_sigma"
+            else:
+                category = "above_3_sigma"
+
+            # Find the left and right bounds for each peak
+            # break
+            # daily_data = df_stove_temperature
+            # _, left, right = find_peak_duration_v3(df_stove_temperature.copy(), index, 3, 'median')
+            
+            left = slope_based_peak_start(index, df, theta)
+            
+            
+            # print(df_stove_temperature_dash.head())
+            # Convert left and right indices to timestamps
+            left_time = df_stove_temperature['ts_datetime'].iloc[left]
+            peak_time = df_stove_temperature['ts_datetime'].iloc[index]
+            right_time = peak_time + (peak_time - left_time) #df_stove_temperature['ts_datetime'].iloc[right]
+            peak_temperature = df_stove_temperature['sensor_status'].iloc[index]
+
+            duration_minutes = (right_time - left_time).total_seconds() / 60
+            # Append the data to the appropriate category
+            categories[category].append({
+                "peak_index": index,
+                "peak_temperature":peak_temperature,
+                "duration_minutes": duration_minutes,
+                "left_time": left_time,
+                "right_time": right_time,
+                "peak_time": peak_time
+            })
+
+
+        # Calculate duration percentages for each category
+        for cat, peaks in categories.items():
+            total_peaks = len(peaks)
+            if total_peaks == 0:
+                peak_analysis[season_name]["duration_percentages"][cat] = {label: 0 for label in duration_labels}
+                continue
+            
+            duration_counts = {label: 0 for label in duration_labels}
+            
+            for peak in peaks:
+                duration = peak["duration_minutes"]
+                for i, (low, high) in enumerate(duration_bins):
+                    if low < duration <= high:
+                        duration_counts[duration_labels[i]] += 1
+                        break
+            
+            # Calculate percentages
+            peak_analysis[season_name]["duration_percentages"][cat] = {label: (count / total_peaks) * 100 for label, count in duration_counts.items()}
+
+        peak_analysis[season_name]["categories"] = categories
+        # return df_stove_temperature_dash
+        
+    # Apply categorization and duration calculation for winter and summer peaks
+    categorize_peaks_with_duration(winter_df, df_stove_temperature,winter_mean, winter_std, "winter")
+    categorize_peaks_with_duration(summer_df, df_stove_temperature,summer_mean, summer_std, "summer")
+    
+    return peak_analysis
+
+
+# def plot_duration_peaks(result, save_dir, subject_id):
+#     # Define the sigma level groups for consistent coloring and legend
+#     sigma_levels = ['within_1_sigma', 'between_1_and_2_sigma', 'between_2_and_3_sigma', 'above_3_sigma']
+#     colors = {
+#         'within_1_sigma': 'red',
+#         'between_1_and_2_sigma': 'orange',
+#         'between_2_and_3_sigma': 'green',
+#         'above_3_sigma': 'blue'
+#     }
+    
+#     # Define duration categories
+#     duration_categories = ['< 5', '5-10', '10-20', '20-100', '100-200', '200+']
+    
+#     # Make sure the save directory exists
+#     os.makedirs(save_dir, exist_ok=True)
+    
+#     # Create a figure with two subplots: one for winter and one for summer
+#     fig, ax = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
+#     fig.suptitle(f'Duration Peaks for Subject {subject_id}')
+
+#     # Plot for each season
+#     for i, season in enumerate(['winter', 'summer']):
+#         data = result[season]['duration_percentages']
+#         x = np.arange(len(duration_categories))  # Set x-axis positions for duration categories
+#         bar_width = 0.2  # Width for each sigma level's bar
+
+#         for j, sigma_level in enumerate(sigma_levels):
+#             # Extract percentages for the current sigma level across all duration categories
+#             values = [data[sigma_level][duration] for duration in duration_categories]
+#             # Plot each sigma level's bar in the appropriate position for each duration category
+#             bars = ax[i].bar(x + j * bar_width, values, width=bar_width, color=colors[sigma_level], 
+#                              label=sigma_level, alpha=0.7)
+            
+#             # Annotate each bar with its corresponding value, rotated vertically
+#             for bar in bars:
+#                 height = bar.get_height()
+#                 ax[i].text(
+#                     bar.get_x() + bar.get_width() / 2, height,
+#                     f'{height:.1f}%', ha='center', va='bottom', fontsize=8, rotation=90
+#                 )
+
+#         # Set titles, labels, and ticks for each subplot
+#         ax[i].set_title(f'{season.capitalize()}')
+#         ax[i].set_xlabel('Duration (minutes)')
+#         ax[i].set_ylabel('Percentage')
+#         ax[i].set_xticks(x + bar_width * (len(sigma_levels) - 1) / 2)  # Center the x-ticks
+#         ax[i].set_xticklabels(duration_categories)
+#         ax[i].legend(title="Sigma Levels")
+
+#     # Save the plot with a filename based on subject_id
+#     file_path = os.path.join(save_dir, f"{subject_id}_duration_peaks.png")
+#     plt.savefig(file_path)
+#     plt.close(fig)
+
+def plot_duration_peaks(result, save_dir, subject_id):
+    # Define sigma levels and duration categories for grouping and colors
+    sigma_levels = ['within_1_sigma', 'between_1_and_2_sigma', 'between_2_and_3_sigma', 'above_3_sigma']
+    duration_categories = ['< 5', '5-10', '10-20', '20-100', '100-200', '200+']
+    
+    # Assign colors to each duration category
+    colors = {
+        '< 5': 'red',
+        '5-10': 'orange',
+        '10-20': 'green',
+        '20-100': 'blue',
+        '100-200': 'purple',
+        '200+': 'brown'
+    }
+    
+    # Make sure the save directory exists
+    os.makedirs(save_dir, exist_ok=True)
+    
+    # Create a figure with two subplots: one for winter and one for summer
+    fig, ax = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
+    fig.suptitle(f'Duration Peaks for Subject {subject_id}')
+
+    # Plot for each season
+    for i, season in enumerate(['winter', 'summer']):
+        data = result[season]['duration_percentages']
+        x = np.arange(len(sigma_levels))  # Set x-axis positions for each sigma level
+        bar_width = 0.1  # Width for each duration category's bar
+
+        # Plot each sigma level with bars for each duration category
+        for j, duration in enumerate(duration_categories):
+            # Extract percentages for the current duration category across all sigma levels
+            values = [data[sigma_level][duration] for sigma_level in sigma_levels]
+            # Plot each duration category as a separate color-coded bar within each sigma level group
+            bars = ax[i].bar(x + j * bar_width, values, width=bar_width, color=colors[duration],
+                             label=duration if i == 0 else "", alpha=0.7)
+            
+            # Annotate each bar with its corresponding value, rotated vertically
+            for bar in bars:
+                height = bar.get_height()
+                ax[i].text(
+                    bar.get_x() + bar.get_width() / 2, height,
+                    f'{height:.1f}%', ha='center', va='bottom', fontsize=8, rotation=90
+                )
+
+        # Set titles, labels, and ticks for each subplot
+        ax[i].set_title(f'{season.capitalize()}')
+        ax[i].set_xlabel('Sigma Levels')
+        ax[i].set_ylabel('Percentage')
+        ax[i].set_xticks(x + bar_width * (len(duration_categories) - 1) / 2)  # Center the x-ticks
+        ax[i].set_xticklabels(sigma_levels, rotation=90)  # Rotate x-tick labels by 90 degrees
+
+    # Place the legend below the x-axis across both subplots
+    handles, labels = ax[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", title="Duration (minutes)", ncol=6, bbox_to_anchor=(0.5, -0.15))
+
+    # Adjust the layout to make space for the legend
+    plt.subplots_adjust(bottom=0.3)  # Increase bottom margin
+
+    # Save the plot with a filename based on subject_id, ensuring nothing is clipped
+    file_path = os.path.join(save_dir, f"{subject_id}_duration_peaks.png")
+    plt.savefig(file_path, bbox_inches='tight')
+    plt.close(fig)
 
 def find_peaks_with_durations(daily_data, peaks,day=None, max_time_diff=10):
     peak_info = []
@@ -290,14 +605,14 @@ def remove_continuous_on_off_v2(df_cleaned_1):
         isEnvironmentalSensor = False
 
     return df_cleaned, isEnvironmentalSensor   
-
+# data_path = path_data
 def read_csv_files_v2(data_path):
     subjects = natsorted(os.listdir(data_path))
     subject_dfs = {}     
     for s in range(len(subjects)):
         print('-*'*40)
         subject_s = subjects[s]
-        # print(subject_s)
+        print(subject_s)
         path_subject = os.path.join(data_path, subject_s, 'environmentals')
         environmentals_sensors = natsorted(os.listdir(path_subject))
         dfs_dict = {}
@@ -313,8 +628,30 @@ def read_csv_files_v2(data_path):
                     df = df[~df['sensor_status'].isin(['unavailable', 'unknown'])]    
                     df.reset_index(drop=True, inplace=True)
                     df, isEnvironmentalSensor = remove_continuous_on_off_v2(df)
-                    df['ts_datetime'] = pd.to_datetime(df['local_time'],format='mixed')
+                    # df['ts_datetime'] = pd.to_datetime(df['local_time'],format='mixed')
+                    
+                    # Function to parse timestamp flexibly
+                    def parse_datetime(time_str):
+                        # Try parsing with microseconds first
+                        for fmt in ('%Y-%m-%d %H:%M:%S.%f%z', '%Y-%m-%d %H:%M:%S%z'):
+                            try:
+                                time_dt = datetime.strptime(time_str, fmt)
+                                # Convert to Europe/Rome timezone
+                                return time_dt.astimezone(pytz.timezone('Europe/Rome'))
+                            except ValueError:
+                                continue
+                        raise ValueError(f"Time data '{time_str}' does not match any expected format.")
+                        
+                    df['ts_datetime'] = df['local_time'].apply(parse_datetime)
+                    invalid_rows = df[df['ts_datetime'].isna()]
+                    if not invalid_rows.empty:
+                        print(f"Found invalid rows (NaT or invalid format):\n{invalid_rows}")
                     df.rename(columns={'timestamp (GMT)': 'ts'}, inplace=True)
+                    # df['ts_datetime'] = df['local_time'].apply(lambda time_str: 
+                    #                        datetime.strptime(time_str, '%Y-%m-%d %H:%M:%S%z')
+                    #                        .astimezone(pytz.timezone('Europe/Rome')))
+
+                    
 
                     # df['ts_datetime'] = pd.to_datetime(df['ts'], unit='ms')
                     # df['ts_datetime_utc'] = pd.to_datetime(df['ts'], unit='ms')
@@ -324,13 +661,13 @@ def read_csv_files_v2(data_path):
                     if not isEnvironmentalSensor:
                       
                         if folder_name in ['Shower_Hum_Temp','Stove_Hum_Temp','Stove_Hum_Temp_temp', 'Stove_Hum_Temp_humidity', 'Shower_Hum_Temp_humidity', 'Shower_Hum_Temp_temp']:
-                            print(subject_s, folder_name, 'Not a binary Sensor')
-                            df['sensor_status'] = pd.to_numeric(df['sensor_status'], errors='coerce')
+                            print(subject_s, folder_name, 'Analog sensor')
+                            df['sensor_status'] = pd.to_numeric(df['sensor_status'])#, errors='coerce')
                             dfs_dict[folder_name] = [df, pd.DataFrame()]
                         else: 
-                            print(subject_s, folder_name, 'Not a binary Sensor')
+                            print(subject_s, folder_name, 'Analog sensor converted to on-off')
                             threshold_value = get_threshold_value(subjects_threshold_dict, subject_s, folder_name)
-                            df['sensor_status'] = pd.to_numeric(df['sensor_status'], errors='coerce')
+                            df['sensor_status'] = pd.to_numeric(df['sensor_status'])#, errors='coerce')
                             df = convert_real_valued_to_on_off(threshold_value, df)  
                             if len(df) > 0:
                                 df_processed = process_sensor_data(df)
@@ -541,49 +878,343 @@ def non_shower_stove_data(device_dict, specific_devices, start_time, end_time, t
     
     return merged_df
 
-def find_peak_duration_v3(daily_data, peak_index, daily_avg_temperature, k, std):
+# # daily_data, peak_index, k ,agg_var= df_stove_temperature.copy(), index, 3, 'median'
+def find_peak_duration_v3(daily_data, peak_index, k, agg_var):
+    
+    columns_to_remove = ['daily_avg_temperature', 'daily_median_temperature', 'daily_std_temperature']
+    daily_data = daily_data.drop(columns=[col for col in columns_to_remove if col in daily_data.columns])
+
     left_index = peak_index
     below_count_left = 0
     
+    if agg_var == 'mean':
+        col_name = 'daily_avg_temperature'
+    elif agg_var == 'median':
+        col_name = 'daily_median_temperature'
+        
+    daily_data['date'] = daily_data['ts_datetime'].dt.date
+
+    # Calculate daily average, median, and standard deviation of sensor_status
+    daily_stats = daily_data.groupby('date')['sensor_status'].agg(
+        daily_avg_temperature='mean',
+        daily_median_temperature='median',
+        daily_std_temperature='std'
+    ).reset_index()
+    
+    # Merge the statistics back into the original DataFrame
+    daily_data = pd.merge(daily_data, daily_stats, on='date', how='left')
     # Traverse left until we find k continuous points below or equal to the daily average temperature
+    points_below_threshold = []  # To store points that meet the condition
+
     while left_index > 0:
-        if daily_data['sensor_status'].iloc[left_index] <= (daily_avg_temperature+std):
+        current_day_avg = daily_data[col_name].iloc[left_index]
+        current_day_std = daily_data['daily_std_temperature'].iloc[left_index]
+        
+        if daily_data['sensor_status'].iloc[left_index] <= (current_day_avg + current_day_std):
             below_count_left += 1
-            # Check if we have found k points below or equal to the daily average temperature
+            points_below_threshold.append(daily_data['sensor_status'].iloc[left_index])  # Store the point
+            # Check if we have found k  continuous points below or equal to the daily average temperature
             if below_count_left == k:
                 break  # Stop if we have found k points
         else:
             below_count_left = 0  # Reset count if a point above average is encountered
-            
+            points_below_threshold = []   
         left_index -= 1
-
-    # Adjust left_index to point to the first value below or equal to the average temperature
-    if below_count_left == k:
-        left_index += 1
 
     right_index = peak_index
     below_count_right = 0
-    
+    points_below_threshold = []
     # Traverse right until we find k continuous points below or equal to the daily average temperature
     while right_index < len(daily_data) - 1:
-        if daily_data['sensor_status'].iloc[right_index + 1] <= (daily_avg_temperature+std):
+        current_day_avg = daily_data[col_name].iloc[right_index ]
+        current_day_std = daily_data['daily_std_temperature'].iloc[right_index]
+        if daily_data['sensor_status'].iloc[right_index] <= (current_day_avg + current_day_std):
+            # print(daily_data.iloc[right_index]['ts_datetime'])
+            points_below_threshold.append(daily_data['sensor_status'].iloc[right_index])  # Store the point
             below_count_right += 1
-            # Check if we have found k points below or equal to the daily average temperature
-            if below_count_right == k:
+            # Check if we have found k continuous points below or equal to the daily average temperature
+            if below_count_right == k:               
                 break  # Stop if we have found k points
         else:
             below_count_right = 0  # Reset count if a point above average is encountered
+            points_below_threshold = []
             
         right_index += 1
+    return daily_data, left_index, right_index
 
-    # Adjust right_index to point to the last value below or equal to the average temperature
-    if below_count_right == k:
-        right_index -= 1
+# peak_index, df = index, df
+def slope_based_peak_start(peak_index, df, theta):
+    print(theta)
+    peak_row = df[df['index'] == peak_index]
+    if peak_row.empty:
+        print("Peak index not found in the DataFrame.")
+        return -99
+    
+    y2 = peak_row['sensor_status'].values[0]
+    x2 = peak_row['ts'].values[0]
+    left_time = pd.to_datetime(x2, unit='ms')
+    left_index = peak_index
+    
+    peak_row_position = peak_row.index[0]
+    i = peak_row_position - 1
+    while i >= df.index[0]:
+        y1 = df.loc[i, 'sensor_status']
+        x1 = df.loc[i, 'ts']
+        prev_time = pd.to_datetime(x1, unit='ms')
+        
+        # Check if left_time and prev_time have the same hour and minute
+        if y2 == y1: #or (left_time.hour == prev_time.hour and left_time.minute == prev_time.minute):
+            # Reset values and move to the next previous index
+            y2 = y1
+            x2 = x1
+            left_time = prev_time
+            left_index = df.iloc[i]['index']
+            i -= 1
+            continue  # Skip the current iteration
+        
+        
+        # Calculate the slope (y2 - y1) / (x2 - x1), where x values are in hours
+        time_diff_in_hours = (left_time - prev_time).total_seconds() / 3600.0
 
-    # Calculate duration in terms of index difference
-    duration = right_index - left_index
-    return duration, left_index, right_index
+        if time_diff_in_hours == 0:
+            print('something went wrong')
+            break  
+        
+        slope = (y2 - y1) / time_diff_in_hours
+        angle = math.atan(slope) * (180 / math.pi)
+        
+        if slope < 0:
+            print('hi')
+            return left_index
+            
+        else:
+            if angle < theta:
+                print('bye')
+                return left_index
+            else:
+                y2 = y1
+                x2 = x1
+                left_time = prev_time
+                left_index = df.iloc[i]['index']#i
+        
+        i -= 1
+    return left_index
 
+
+# temperature_df, save_path = df_stove_temperature, '/home/hubble/temp'
+def plot_peaks_and_mean_temperature(temperature_df, save_path):
+    # Extract the subject name from the subject_id column
+    subject_id = temperature_df['subject_id'].iloc[0]
+    subject_name = f"Subject_{subject_id}"
+    
+    # Ensure save_path exists and create a folder for the subject's peak values
+    save_folder = save_path#os.path.join(save_path, f"{subject_name}_peak_values")
+    os.makedirs(save_folder, exist_ok=True)
+    
+    # Step 0: Detect peaks on the entire dataset
+    sensor_values = temperature_df['sensor_status'].values
+    peaks, _ = find_peaks(sensor_values, prominence=1.5)
+    temperature_df['peaks'] = 0
+    temperature_df.loc[peaks, 'peaks'] = 1  # Mark peaks as '1' in the 'peaks' column
+        
+    # Step 1: Divide data into winter (November-February) and summer (March-October)
+    temperature_df['month'] = temperature_df['ts_datetime'].dt.month
+    winter_mask = temperature_df['month'].isin([11, 12, 1, 2])
+    summer_mask = temperature_df['month'].isin([3, 4, 5, 6, 7, 8, 9, 10])
+    
+    # Step 2: Calculate average temperature and standard deviation for winter and summer
+    average_temperature_winter = temperature_df[winter_mask]['sensor_status'].mean()
+    std_deviation_winter = temperature_df[winter_mask]['sensor_status'].std()
+    
+    average_temperature_summer = temperature_df[summer_mask]['sensor_status'].mean()
+    std_deviation_summer = temperature_df[summer_mask]['sensor_status'].std()
+
+    # Step 3: Create subplots for winter and summer
+    fig, axs = plt.subplots(2, 1, figsize=(12, 12), sharex=False)
+
+    # Winter subplot (November to February)
+    winter_df = temperature_df[winter_mask]
+    axs[0].scatter(winter_df[winter_df['peaks'] == 1]['ts_datetime'],
+                   winter_df[winter_df['peaks'] == 1]['sensor_status'], 
+                   color='red', label='Peak Temperatures')
+    
+    # Draw horizontal lines for winter mean and multiple standard deviations
+    axs[0].axhline(y=average_temperature_winter, color='black', linestyle='-', 
+                   label=f'Winter Avg: {average_temperature_winter:.2f} °C')
+    
+    # 1σ (magenta), 2σ (blue), and 3σ (black)
+    axs[0].axhline(y=average_temperature_winter + std_deviation_winter, color='magenta', linestyle='--', 
+                   label=f'Winter +1σ: {average_temperature_winter + std_deviation_winter:.2f} °C')
+    # axs[0].axhline(y=average_temperature_winter - std_deviation_winter, color='magenta', linestyle='--', 
+    #                label=f'Winter -1σ: {average_temperature_winter - std_deviation_winter:.2f} °C')
+
+    axs[0].axhline(y=average_temperature_winter + 2 * std_deviation_winter, color='blue', linestyle='--', 
+                   label=f'Winter +2σ: {average_temperature_winter + 2 * std_deviation_winter:.2f} °C')
+    # axs[0].axhline(y=average_temperature_winter - 2 * std_deviation_winter, color='blue', linestyle='--', 
+    #                label=f'Winter -2σ: {average_temperature_winter - 2 * std_deviation_winter:.2f} °C')
+
+    axs[0].axhline(y=average_temperature_winter + 3 * std_deviation_winter, color='black', linestyle='--', 
+                   label=f'Winter +3σ: {average_temperature_winter + 3 * std_deviation_winter:.2f} °C')
+    # axs[0].axhline(y=average_temperature_winter - 3 * std_deviation_winter, color='black', linestyle='--', 
+    #                label=f'Winter -3σ: {average_temperature_winter - 3 * std_deviation_winter:.2f} °C')
+
+    # Set x-ticks only on every 5th peak to avoid overcrowding
+    peak_times_winter = winter_df[winter_df['peaks'] == 1]['ts_datetime']
+    selected_peak_times_winter = peak_times_winter[::5]  # Select every 5th peak
+    if len(selected_peak_times_winter)>0:
+        axs[0].set_xticks(selected_peak_times_winter)
+    axs[0].tick_params(axis='x', rotation=90)
+    # axs[0].set_xlim([pd.Timestamp('2023-11-01'), pd.Timestamp('2024-02-28')])
+    
+    axs[0].set_ylabel('Temperature (°C)')
+    axs[0].set_title(f"{subject_name} - Winter Temperature with Peaks")
+    axs[0].legend()
+    axs[0].grid()
+
+    # Summer subplot (March to October)
+    summer_df = temperature_df[summer_mask]
+
+
+    axs[1].scatter(summer_df[summer_df['peaks'] == 1]['ts_datetime'],
+                   summer_df[summer_df['peaks'] == 1]['sensor_status'], 
+                   color='red', label='Peak Temperatures')
+
+    # print('********************************')
+    # print(summer_df['ts_datetime'].isna().sum())
+    # print('********************************')
+    # Draw horizontal lines for summer mean and multiple standard deviations
+    axs[1].axhline(y=average_temperature_summer, color='black', linestyle='-', 
+                   label=f'Summer Avg: {average_temperature_summer:.2f} °C')
+    
+    # 1σ (magenta), 2σ (blue), and 3σ (black)
+    axs[1].axhline(y=average_temperature_summer + std_deviation_summer, color='magenta', linestyle='--', 
+                    label=f'Summer +1σ: {average_temperature_summer + std_deviation_summer:.2f} °C')
+    # axs[1].axhline(y=average_temperature_summer - std_deviation_summer, color='magenta', linestyle='--', 
+                    # label=f'Summer -1σ: {average_temperature_summer - std_deviation_summer:.2f} °C')
+
+    axs[1].axhline(y=average_temperature_summer + 2 * std_deviation_summer, color='blue', linestyle='--', 
+                    label=f'Summer +2σ: {average_temperature_summer + 2 * std_deviation_summer:.2f} °C')
+    # axs[1].axhline(y=average_temperature_summer - 2 * std_deviation_summer, color='blue', linestyle='--', 
+                    # label=f'Summer -2σ: {average_temperature_summer - 2 * std_deviation_summer:.2f} °C')
+
+    axs[1].axhline(y=average_temperature_summer + 3 * std_deviation_summer, color='black', linestyle='--', 
+                    label=f'Summer +3σ: {average_temperature_summer + 3 * std_deviation_summer:.2f} °C')
+    # axs[1].axhline(y=average_temperature_summer - 3 * std_deviation_summer, color='black', linestyle='--', 
+                    # label=f'Summer -3σ: {average_temperature_summer - 3 * std_deviation_summer:.2f} °C')
+
+    # Set x-ticks only on every 5th peak to avoid overcrowding
+    peak_times_summer = summer_df[summer_df['peaks'] == 1]['ts_datetime']
+    # print(peak_times_summer)
+    # print()
+    # print()
+    selected_peak_times_summer = peak_times_summer[::10]  # Select every 5th peak
+    # print(selected_peak_times_summer)
+    # print('---------------------')
+    axs[1].set_xticks(selected_peak_times_summer)
+    axs[1].tick_params(axis='x', rotation=90)
+    # axs[1].set_xlim([pd.Timestamp('2024-03-01'), pd.Timestamp('2024-10-31')])
+
+    axs[1].set_xlabel('Date')
+    axs[1].set_ylabel('Temperature (°C)')
+    axs[1].set_title(f"{subject_name} - Summer Temperature with Peaks")
+    axs[1].legend()
+    axs[1].grid()
+    
+    # Save the overall plot
+    overall_plot_filename = f"{subject_name}_temperature_with_peaks.png"
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_folder, overall_plot_filename))
+    plt.close()
+
+
+
+
+# def plot_peaks_and_mean_temperature(temperature_df, save_path):
+#     # Extract the subject name from the subject_id column
+#     subject_id = temperature_df['subject_id'].iloc[0]
+#     subject_name = f"Subject_{subject_id}"
+    
+#     # Ensure save_path exists and create a folder for the subject's peak values
+#     save_folder = os.path.join(save_path, f"{subject_name}_peak_values")
+#     os.makedirs(save_folder, exist_ok=True)
+    
+#     # Step 0: Detect peaks on the entire dataset
+#     sensor_values = temperature_df['sensor_status'].values
+#     peaks, _ = find_peaks(sensor_values, prominence=1.5)
+#     temperature_df['peaks'] = 0
+#     temperature_df.loc[peaks, 'peaks'] = 1  # Mark peaks as '1' in the 'peaks' column
+        
+#     # Step 1: Divide data into winter (November-February) and summer (March-October)
+#     temperature_df['month'] = temperature_df['ts_datetime'].dt.month
+#     winter_mask = temperature_df['month'].isin([11, 12, 1, 2])
+#     summer_mask = temperature_df['month'].isin([3, 4, 5, 6, 7, 8, 9, 10])
+    
+#     # Step 2: Calculate average temperature and standard deviation for winter and summer
+#     average_temperature_winter = temperature_df[winter_mask]['sensor_status'].mean()
+#     std_deviation_winter = temperature_df[winter_mask]['sensor_status'].std()
+    
+#     average_temperature_summer = temperature_df[summer_mask]['sensor_status'].mean()
+#     std_deviation_summer = temperature_df[summer_mask]['sensor_status'].std()
+
+#     # Step 3: Create subplots for winter and summer
+#     fig, axs = plt.subplots(2, 1, figsize=(12, 12), sharex=False)
+
+#     # Winter subplot (November to February)
+#     winter_df = temperature_df[winter_mask]
+#     axs[0].scatter(winter_df[winter_df['peaks'] == 1]['ts_datetime'],
+#                    winter_df[winter_df['peaks'] == 1]['sensor_status'], 
+#                    color='red', label='Peak Temperatures')
+    
+#     # Draw horizontal lines for winter mean and standard deviation
+#     axs[0].axhline(y=average_temperature_winter, color='black', linestyle='-', 
+#                    label=f'Winter Avg: {average_temperature_winter:.2f} °C')
+#     axs[0].axhline(y=average_temperature_winter + std_deviation_winter, color='black', linestyle='--', 
+#                    label=f'Winter Std Dev: {std_deviation_winter:.2f} °C')
+#     axs[0].axhline(y=average_temperature_winter - std_deviation_winter, color='black', linestyle='--')
+
+#     # Set x-ticks only on every 5th peak to avoid overcrowding
+#     peak_times_winter = winter_df[winter_df['peaks'] == 1]['ts_datetime']
+#     selected_peak_times_winter = peak_times_winter[::5]  # Select every 5th peak
+#     axs[0].set_xticks(selected_peak_times_winter)
+#     axs[0].tick_params(axis='x', rotation=90)
+#     axs[0].set_xlim([pd.Timestamp('2023-11-01'), pd.Timestamp('2024-02-28')])
+    
+#     axs[0].set_ylabel('Temperature (°C)')
+#     axs[0].set_title(f"{subject_name} - Winter Temperature with Peaks")
+#     axs[0].legend()
+#     axs[0].grid()
+
+#     # Summer subplot (March to October)
+#     summer_df = temperature_df[summer_mask]
+#     axs[1].scatter(summer_df[summer_df['peaks'] == 1]['ts_datetime'],
+#                    summer_df[summer_df['peaks'] == 1]['sensor_status'], 
+#                    color='red', label='Peak Temperatures')
+
+#     # Draw horizontal lines for summer mean and standard deviation
+#     axs[1].axhline(y=average_temperature_summer, color='black', linestyle='-', 
+#                    label=f'Summer Avg: {average_temperature_summer:.2f} °C')
+#     axs[1].axhline(y=average_temperature_summer + std_deviation_summer, color='black', linestyle='--', 
+#                    label=f'Summer Std Dev: {std_deviation_summer:.2f} °C')
+#     axs[1].axhline(y=average_temperature_summer - std_deviation_summer, color='black', linestyle='--')
+
+#     # Set x-ticks only on every 5th peak to avoid overcrowding
+#     peak_times_summer = summer_df[summer_df['peaks'] == 1]['ts_datetime']
+#     selected_peak_times_summer = peak_times_summer[::5]  # Select every 5th peak
+#     axs[1].set_xticks(selected_peak_times_summer)
+#     axs[1].tick_params(axis='x', rotation=90)
+#     axs[1].set_xlim([pd.Timestamp('2024-03-01'), pd.Timestamp('2024-10-31')])
+
+#     axs[1].set_xlabel('Date')
+#     axs[1].set_ylabel('Temperature (°C)')
+#     axs[1].set_title(f"{subject_name} - Summer Temperature with Peaks")
+#     axs[1].legend()
+#     axs[1].grid()
+    
+#     # Save the overall plot
+#     overall_plot_filename = f"{subject_name}_temperature_with_peaks.png"
+#     plt.tight_layout()
+#     plt.savefig(os.path.join(save_folder, overall_plot_filename))
+#     plt.close()
 
 
 def plot_device_usage_heatmap(monthly_usage, subject, save_path):

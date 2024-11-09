@@ -5,11 +5,7 @@ Created on Mon Oct 28 10:58:48 2024
 
 @author: hubble
 """
-
 from main_utility import *
-
-
-
 if __name__ == "__main__":
     
     # define colors to show start and end of the peak
@@ -50,8 +46,8 @@ if __name__ == "__main__":
     subject = subjects[sub] # Name of the subject
     data_subject = data[subject] # Load the whole data
     ## Specify the date where we have to pick the data
-    start_date = pd.to_datetime('2023-12-20').tz_localize('Europe/Rome')
-    end_date = pd.to_datetime('2023-12-24').tz_localize('Europe/Rome')
+    start_date = pd.to_datetime('2024-01-01').tz_localize('Europe/Rome')
+    end_date = pd.to_datetime('2024-01-31').tz_localize('Europe/Rome')
     
     df_stove_temperature = data_subject['Stove_Hum_Temp_temp'][0] ## Load subject's temperature data in the kitchen
     
@@ -63,17 +59,12 @@ if __name__ == "__main__":
     data_start_date = df_stove_temperature['ts_datetime'].min()
     data_end_date = df_stove_temperature['ts_datetime'].max()
     
-
-    
     temperature_df = df_stove_temperature[
     (df_stove_temperature['ts_datetime'] >= start_date) &
     (df_stove_temperature['ts_datetime'] <= end_date)].copy()
     
     ## Compute the peak
-    peaks, properties = find_peaks(temperature_df['sensor_status'].values, prominence=1.5)
-    
-    
-    
+    peaks, properties = find_peaks(temperature_df['sensor_status'].values, prominence=3)
     temperature_df = compute_daily_temperature(temperature_df.copy())
     peaks = remove_peaks_below_daily_avg(temperature_df, peaks)
   
@@ -81,7 +72,8 @@ if __name__ == "__main__":
     plt.figure(figsize=(10, 5))
     
     # Plot temperature data and mark peaks
-    plt.plot(temperature_df['ts_datetime'], temperature_df['sensor_status'], label='Temperature', color='blue')
+    plt.plot(temperature_df['ts_datetime'], temperature_df['sensor_status'], label='Temperature', color='red')
+    plt.scatter(temperature_df['ts_datetime'], temperature_df['sensor_status'], color='blue')
     plt.plot(temperature_df['ts_datetime'].iloc[peaks], temperature_df['sensor_status'].iloc[peaks], 'ro', label='Peaks')
     plt.plot(temperature_df['ts_datetime'], temperature_df['daily_avg_temp'], label='Room Temperature', color='magenta')
     plt.plot(temperature_df['ts_datetime'], temperature_df['daily_avg_temp'] + temperature_df['daily_avg_std'], 
@@ -103,10 +95,10 @@ if __name__ == "__main__":
         peak_temperature = temperature_df.iloc[peak_index]['sensor_status'] # Peak Temperature
         room_temperature = temperature_df.iloc[peak_index]['daily_avg_temp'] # Room Temperature
         std = temperature_df.iloc[peak_index]['daily_avg_std'] # Room Temperature
-        print(room_temperature,std)
+        print(peak_temperature, room_temperature,std)
 
         peak_time = temperature_df['ts_datetime'].iloc[peak_index] # When did the peak occur
-        duration, left, right = find_peak_duration_v3(temperature_df.copy(), peak_index,room_temperature,3,std)
+        duration, left, right = find_peak_duration_v3(temperature_df.copy(), peak_index, 3, 'median')
 
         left_time = temperature_df['ts_datetime'].iloc[left]
         right_time = temperature_df['ts_datetime'].iloc[right]
@@ -143,3 +135,36 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.show()
 
+# # Step 1: Create a new column for the daily average temperature
+df_stove_temperature['date'] = df_stove_temperature['ts_datetime'].dt.date
+df_stove_temperature['daily_avg_temp'] = df_stove_temperature.groupby('date')['sensor_status'].transform('mean')
+
+# Step 2: Calculate the standard deviation of the sensor readings for each day
+df_stove_temperature['daily_avg_std'] = df_stove_temperature.groupby('date')['sensor_status'].transform('std')
+
+# Step 3: Find peaks in the 'sensor_status' data using find_peaks
+peaks, _ = find_peaks(df_stove_temperature['sensor_status'], prominence=1.5)
+
+# Step 4: Mark all detected peaks as 1 in the 'peaks' column
+df_stove_temperature['peaks'] = 0  # Reset the peaks column to 0
+df_stove_temperature.loc[peaks, 'peaks'] = 1  # Mark detected peaks
+
+# Step 5: Define a function to remove peaks below the daily average + std threshold
+def remove_peaks_below_daily_avg(temperature_df, peaks):
+    filtered_peaks = [
+        peak for peak in peaks
+        if temperature_df.loc[peak, 'sensor_status'] > (
+            temperature_df.loc[peak, 'daily_avg_temp'] + temperature_df.loc[peak, 'daily_avg_std']
+        )
+    ]
+    return filtered_peaks
+
+# Step 6: Apply the function to filter out peaks
+filtered_peaks = remove_peaks_below_daily_avg(df_stove_temperature, peaks)
+
+# Step 7: Mark only the valid peaks as 1 in the 'peaks' column
+df_stove_temperature['peaks'] = 0  # Reset the peaks column to 0
+df_stove_temperature.loc[filtered_peaks, 'peaks'] = 1  # Mark the valid peaks
+
+# Display the final DataFrame with valid peaks
+print(df_stove_temperature)

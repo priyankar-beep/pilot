@@ -23,7 +23,7 @@ cooking_devices = ['CoffeMachine', 'Cookware', 'Dishes', 'Dishes_Glasses', 'Dish
 ## The following commented code runs only one time
 # path_data = '/home/hubble/work/serenade/data/subject_data_sept_2024/FINAL_DATA'
 # subject_dfs = read_csv_files_v2(path_data)
-# with open('subject_data_sept_2024.pkl', 'wb') as file:
+# with open('subject_data_sept_2024_v2.pkl', 'wb') as file:
 #     pickle.dump(subject_dfs, file)
 
 
@@ -103,7 +103,7 @@ for sub in range(len(subjects)):
                 room_temperature = temperature_df.iloc[peak_index]['daily_avg_temp'] # Room Temperature
                 std = temperature_df.iloc[peak_index]['daily_avg_std']
                 peak_time = temperature_df['ts_datetime'].iloc[peak_index] # When did the peak occur
-                duration, left, right = find_peak_duration_v3(temperature_df.copy(), peak_index,room_temperature, 3, std)
+                duration, left, right = find_peak_duration_v3(temperature_df.copy(), peak_index, 3, 'median')
                 left_time = temperature_df['ts_datetime'].iloc[left]
                 right_time = temperature_df['ts_datetime'].iloc[right]
                 
@@ -125,7 +125,7 @@ for sub in range(len(subjects)):
         percentage_usage = calculate_device_usage_count(date_peak_times, date_cooking_devices, subject_kitchen_devices2)
         monthly_usage[month_start] = percentage_usage
         monthly_temp_peaks[month_start] = date_peak_times
-        # plot_daily_activity(date_peak_times, date_cooking_devices, subject, subject_kitchen_devices, '/home/hubble/cooking')
+        plot_daily_activity(date_peak_times, date_cooking_devices, subject, subject_kitchen_devices, '/home/hubble/cooking')
     # plot_device_usage_heatmap(monthly_usage, subject, "/home/hubble/cooking")
     monthly_peak_counts, monthly_avg_durations, monthly_days_with_peaks = calculate_monthly_peak_stats(monthly_temp_peaks)
     # plot_temperature_peak_stats(monthly_peak_counts, monthly_avg_durations, monthly_days_with_peaks, "/home/hubble/cooking", subject)
