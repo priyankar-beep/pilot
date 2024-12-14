@@ -319,8 +319,8 @@ def analyze_seasonal_peaks_with_duration_v2(df_stove_temperature , prom = 1.5, t
         peak_temperature = df_stove_temperature['sensor_status'].iloc[indx]
         
         if left == None:  
-            left_time = peak_time - timedelta(minutes=15)
-            right_time = peak_time + timedelta(minutes=15)
+            left_time = peak_time #- timedelta(minutes=15)
+            right_time = peak_time #+ timedelta(minutes=15)
         else:  
             left_time = df_stove_temperature['ts_datetime'].iloc[left]
             right_time = peak_time + (peak_time - left_time) 
@@ -1379,7 +1379,7 @@ def plot_peak_and_signal(kitchen_temperature_data, peaks):
     plt.show()
 
 
-def plot_device_usage_prof_claudio(subject, subject_devices, data_subject, df_stove_temperature, peak_index, backward_time, forward_time, stop_temp, st , et, pt, pi, pth, fwhm):
+def plot_device_usage_prof_claudio(subject, subject_devices, data_subject, df_stove_temperature, peak_index, backward_time, forward_time, stop_temp, st , et, pt, pi, pth, fwhm,delta_T):
     """
     Plots device usage during a temperature peak event.
     
@@ -1410,14 +1410,17 @@ def plot_device_usage_prof_claudio(subject, subject_devices, data_subject, df_st
     """
     temperature_data_in_peak = df_stove_temperature[(df_stove_temperature['ts_datetime'] >= (backward_time - pd.Timedelta(hours=2))) & 
                                                     (df_stove_temperature['ts_datetime'] <= (forward_time + pd.Timedelta(hours=2)))]
-                            
     
+    data_dict = {}                        
+    peak_color = 'green'
     ## average temperature of the day
     peak_temp = df_stove_temperature.iloc[peak_index]['sensor_status']
     avg_temp = df_stove_temperature.iloc[peak_index]['daily_avg_temperature']
     median_temp = df_stove_temperature.iloc[peak_index]['daily_median_temperature']
     std_temp = df_stove_temperature.iloc[peak_index]['daily_std_temperature']
     
+    signal = df_stove_temperature['sensor_status'].values
+    angle = compute_angle_between_peak_and_previous_to_peak(df_stove_temperature,peak_index,signal)
     
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
     
@@ -1430,7 +1433,16 @@ def plot_device_usage_prof_claudio(subject, subject_devices, data_subject, df_st
               temperature_data_in_peak['sensor_status'], 
               color='blue')
     
-    ax1.text(pt, peak_temp - 0.5, f"{fwhm:.0f} min", color=peak_color, fontsize=10, ha='center')
+    # ax1.text(pt, peak_temp - 0.5, f"{fwhm:.0f} min", color=peak_color, fontsize=10, ha='center')
+    # print(pt)
+    ax1.text(
+        pt + timedelta(minutes=30),
+        peak_temp - 2,
+        f"({fwhm:.0f} min,\n {angle:.1f}°)",
+        color=peak_color,
+        fontsize=10,
+        ha='center'
+    )
     
 
     # ax1.axvline(pt,linestyle=':')
@@ -1440,19 +1452,21 @@ def plot_device_usage_prof_claudio(subject, subject_devices, data_subject, df_st
     ax1.axhline(y=median_temp + delta_T, color='blue', linestyle='-', linewidth=1.5, label=f'Median ({median_temp:.2f}) + Delta ({delta_T:.2f})')
     # ax1.axhline(y=stop_temp, color='green', linestyle='-', linewidth=1.5, label=f'Peak ({peak_temp:.2f}) - Delta/2 ({delta_T/2})')
 
-    ax1.axvline(backward_time, color='blue', linestyle='-', linewidth=1.5, label=f'Observation Start ({backward_time.strftime("%H:%M:%S")})')
-    ax1.axvline(forward_time, color='blue', linestyle='-', linewidth=1.5, label = f'Observation End ({forward_time.strftime("%H:%M:%S")}')
+    # ax1.axvline(backward_time, color='blue', linestyle='-', linewidth=1.5, label=f'Observation Start ({backward_time.strftime("%H:%M:%S")})')
+    # ax1.axvline(forward_time, color='blue', linestyle='-', linewidth=1.5, label = f'Observation End ({forward_time.strftime("%H:%M:%S")}')
     
     # Annotate st and et times near the vertical lines
-    ax1.text(backward_time, ax1.get_ylim()[1], backward_time.strftime("%H:%M:%S"), 
-              color='black', ha='right', va='bottom', fontsize=10, rotation=90)
-    ax1.text(forward_time, ax1.get_ylim()[1], forward_time.strftime("%H:%M:%S"), 
-              color='black', ha='right', va='bottom', fontsize=10, rotation=90)
+    # ax1.text(backward_time, ax1.get_ylim()[1], backward_time.strftime("%H:%M:%S"), 
+    #           color='black', ha='right', va='bottom', fontsize=10, rotation=90)
+    
+    # ax1.text(forward_time, ax1.get_ylim()[1], forward_time.strftime("%H:%M:%S"), 
+    #           color='black', ha='right', va='bottom', fontsize=10, rotation=90)
+    
     ax1.text(pt, ax1.get_ylim()[1], pt.strftime("%H:%M:%S"), 
               color='black', ha='right', va='bottom', fontsize=10, rotation=90)
         
-    ax1.axvline(st, color='black', linestyle='--', linewidth=1.5)
-    ax1.axvline(et, color='black', linestyle='--', linewidth=1.5)
+    ax1.axvline(st, color='black', linestyle='--', linewidth=1.5, label=f'Peak Start ({st.strftime("%H:%M:%S")})')
+    ax1.axvline(et, color='black', linestyle='--', linewidth=1.5, label=f'Peak End ({et.strftime("%H:%M:%S")})')
     
     # Annotate st and et times near the vertical lines
     ax1.text(st, ax1.get_ylim()[1], st.strftime("%H:%M:%S"), 
@@ -1467,8 +1481,8 @@ def plot_device_usage_prof_claudio(subject, subject_devices, data_subject, df_st
     
     subject_kitchen_devices = sorted(subject_devices[subject])
     count_var = 0
-    for key in natsorted(data_subject.keys()):
-    # for key in natsorted(subject_kitchen_devices):
+    # for key in natsorted(data_subject.keys()):
+    for key in natsorted(subject_kitchen_devices):
         if "Stove" not in key and "Shower" not in key:
             temp = data_subject[key][1].copy()
 
@@ -1518,7 +1532,7 @@ def plot_device_usage_prof_claudio(subject, subject_devices, data_subject, df_st
     # Set the common x-axis label
     fig.tight_layout()
     
-    timestamp_str = backward_time.strftime('%Y-%m-%d_%H-%M')  # Format: '2024-08-01_19-13-42'
+    timestamp_str = pt.strftime('%Y-%m-%d_%H-%M')  # Format: '2024-08-01_19-13-42'
     save_path = os.path.join(pth, f"{pi}_{subject}_{timestamp_str}.png")
     plt.savefig(save_path, format='png', dpi=300, bbox_inches='tight')
     plt.close()  # Close the figure after saving
@@ -1857,6 +1871,12 @@ def classify_time_of_day(time):
     classify_time_of_day(datetime.time(7, 30))  # Returns 'breakfast'
     classify_time_of_day(datetime.time(13, 0))  # Returns 'lunch'
     """
+    breakfast_time = ("06:00:00", "10:00:00")
+    lunch_time = ("11:00:00", "15:00:00")
+    dinner_time = ("18:00:00", "23:59:00")
+    breakfast_start, breakfast_end = pd.to_timedelta(breakfast_time[0]), pd.to_timedelta(breakfast_time[1])
+    lunch_start, lunch_end = pd.to_timedelta(lunch_time[0]), pd.to_timedelta(lunch_time[1])
+    dinner_start, dinner_end = pd.to_timedelta(dinner_time[0]), pd.to_timedelta(dinner_time[1])
     if breakfast_start <= time <= breakfast_end:
         return 'breakfast'
     elif lunch_start <= time <= lunch_end:
@@ -1890,6 +1910,8 @@ def compute_angle_between_peak_and_previous_to_peak(df_stove_temperature,peak_in
         - The time difference between the peak and previous peak is computed in hours.
     """    
     angle = -99.99
+    peak_time = df_stove_temperature['ts_datetime'].iloc[peak_index]
+    peak_height = df_stove_temperature['sensor_status'].iloc[peak_index]
     # Skip the first peak since there's no previous peak
     prev_peak_index = peak_index - 1
     x1 = df_stove_temperature['ts_datetime'].iloc[prev_peak_index]
@@ -1900,6 +1922,11 @@ def compute_angle_between_peak_and_previous_to_peak(df_stove_temperature,peak_in
     time_diff_hours = time_diff_seconds / 3600  # Convert seconds to hours
     
     # Slope and angle calculation
+    # print(peak_height)
+    
+    # print()
+    
+    # print(y1)
     height_diff = peak_height - y1
     slope = height_diff / time_diff_hours
     angle = math.atan(slope) * (180 / math.pi)  # Convert radians to degrees
@@ -2062,7 +2089,8 @@ def slope_based_peak_start(peak_index, df, theta):
 #         i -= 1
 #     return 0  # Return -1 if no valid point is found
 
-#peak_index ,df , theta, k = index, df_stove_temperature.copy(), 40, 2
+# peak_index ,df , theta, k = indx, df_stove_temperature.copy(), 40, 2
+# xx = slope_based_peak_start_v2(peak_index, df,40, 2)
 def slope_based_peak_start_v2(peak_index, df, theta=40, k=2):
     """
     Determines the start index of a peak in a signal based on the slope of the temperature curve before the peak.
@@ -2108,6 +2136,7 @@ def slope_based_peak_start_v2(peak_index, df, theta=40, k=2):
         y1 = df.loc[i, 'sensor_status']
         x1 = df.loc[i, 'ts']
         prev_time = pd.to_datetime(x1, unit='ms')
+        # print(i)
         
         # Check if left_time and prev_time have the same hour and minute
         if y2 == y1: 
@@ -2121,8 +2150,8 @@ def slope_based_peak_start_v2(peak_index, df, theta=40, k=2):
             break  # Avoid division by zero if timestamps are identical
             
         if time_diff_in_hours >= 0.5:
-            # break
-            return i
+            print('time difference is greater than 0.5 hours.....')
+            return left_index#i
 
         # Calculate slope and angle
         slope = (y2 - y1) / time_diff_in_hours
@@ -2136,26 +2165,29 @@ def slope_based_peak_start_v2(peak_index, df, theta=40, k=2):
         else:
             # Reset the counter and starting index if the streak is broken
             consecutive_count = 0
-            first_angle_below_threshold_index = None
+            first_angle_below_threshold_index = i
 
         # If k consecutive angles below theta are found, return the indices
         if consecutive_count == k:
+            print('consecutive count is  == k')
             if first_angle_below_threshold_index != peak_index:
-                break
-                # return first_angle_below_threshold_index
+                # break
+                return first_angle_below_threshold_index
             else:
                 first_angle_below_threshold_index = i 
-                break
-                # return first_angle_below_threshold_index
+                # break
+                return first_angle_below_threshold_index
 
         # Update previous values
+        
         y2 = y1
         x2 = x1
         left_time = prev_time
         left_index = df.index[i]#['index']
         i -= 1
+        
     # print('out of the loop')
-    return None
+    return left_index
 
 
 
